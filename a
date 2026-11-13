@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly PROJECT_NAME="ZXFont"
+readonly VERSIONS_FILE="versions.md"
+
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+cd "${project_root}"
+
+if [[ ! -f "${VERSIONS_FILE}" ]]; then
+  echo "ERROR: ${VERSIONS_FILE} not found." >&2
+  exit 1
+fi
+
+if ! command -v zip >/dev/null 2>&1; then
+  echo "ERROR: zip is required (sudo apt install zip)." >&2
+  exit 1
+fi
+
+version="$(
+  sed -nE 's/^## v[0-9]+\.[0-9]+\.[0-9]+ -> v([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]*$/\1/p' \
+    "${VERSIONS_FILE}" | tail -n 1
+)"
+
+if [[ -z "${version}" ]]; then
+  echo "ERROR: no valid version heading found in ${VERSIONS_FILE}." >&2
+  exit 1
+fi
+
+# The version header and CMake project do not exist before the core bootstrap.
+# Check the CMake version if a project definition has already been added.
+if [[ -f CMakeLists.txt ]]; then
+  cmake_version="$(
+    awk '
+      /^[[:space:]]*project[[:space:]]*\(/ { in_project=1 }
+      in_project {
+        if (match($0, /VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+/)) {
+          value=substr($0, RSTART, RLENGTH)
+          sub(/^VERSION[[:space:]]+/, "", value)
+          print value
+          exit
+        }
+        if (/\)/) in_project=0
+      }
+    ' CMakeLists.txt
+  )"
+  if [[ -n "${cmake_version}" && "${cmake_version}" != "${version}" ]]; then
+    echo "ERROR: CMake version ${cmake_version} != ${VERSIONS_FILE} version ${version}." >&2
+    exit 1
+  fi
+fi
+
+archive="${project_root}/../${PROJECT_NAME}_v${version}_current.zip"
+tmp_dir="$(mktemp -d "${project_root}/../.zxfont-archive.XXXXXXXX")"
+trap 'rm -rf -- "${tmp_dir}"' EXIT
+
+echo "Detected version: v${version}"
+echo "Creating archive: ${archive}"
+
+zip -q -r "${tmp_dir}/archive.zip" . \
+  -x '.git' '.git/*' \
+     'build' 'build/*' 'build-*' 'build-*/*' \
+     '.cache' '.cache/*' '.venv' '.venv/*' \
+     '__pycache__' '*/__pycache__/*' '*.pyc' \
+     '.env' '.env.*' \
+     '*.swp' '*~' \
+     "${PROJECT_NAME}_v*_current.zip"
+
+mv -f -- "${tmp_dir}/archive.zip" "${archive}"
+echo "Done: ${archive}"

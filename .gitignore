@@ -1,0 +1,16 @@
+# Generated build artifacts
+/build/
+/build-*/
+
+# Temporary files and local tooling
+.cache/
+.venv/
+__pycache__/
+*.pyc
+*.swp
+*~
+.env
+.env.*
+
+# Generated source snapshots
+ZXFont_v*_current.zip

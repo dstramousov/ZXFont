@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly VERSIONS_FILE="versions.md"
+
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+cd "${project_root}"
+
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo "ERROR: not inside a git repository." >&2
+  exit 1
+fi
+
+if [[ ! -f "${VERSIONS_FILE}" ]]; then
+  echo "ERROR: ${VERSIONS_FILE} not found." >&2
+  exit 1
+fi
+
+if [[ -z "$(git status --porcelain)" ]]; then
+  echo "No changes to approve."
+  exit 0
+fi
+
+branch="$(git symbolic-ref --quiet --short HEAD)" || {
+  echo "ERROR: detached HEAD; switch to a branch first." >&2
+  exit 1
+}
+
+latest_heading="$(
+  sed -nE '/^## v[0-9]+\.[0-9]+\.[0-9]+ -> v[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$/p' \
+    "${VERSIONS_FILE}" | tail -n 1
+)"
+
+if [[ -z "${latest_heading}" ]]; then
+  echo "ERROR: no valid version heading in ${VERSIONS_FILE}." >&2
+  exit 1
+fi
+
+version_jump="${latest_heading#'## '}"
+current_version="${latest_heading##* -> v}"
+previous_version=""
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  previous_versions="$(git show "HEAD:${VERSIONS_FILE}" 2>/dev/null || true)"
+  previous_version="$(
+    printf '%s\n' "${previous_versions}" \
+      | sed -nE 's/^## v[0-9]+\.[0-9]+\.[0-9]+ -> v([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]*$/\1/p' \
+      | tail -n 1
+  )"
+fi
+
+if [[ -n "${previous_version}" ]]; then
+  if [[ "${previous_version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    expected_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((10#${BASH_REMATCH[3]} + 1))"
+  fi
+  if [[ "${current_version}" != "${expected_version}" || \
+        "${version_jump}" != "v${previous_version} -> v${current_version}" ]]; then
+    echo "ERROR: expected version jump v${previous_version} -> v${expected_version}." >&2
+    exit 1
+  fi
+fi
+
+section_body="$(
+  awk -v heading="${latest_heading}" '
+    $0 == heading { found=1; next }
+    found && /^## / { exit }
+    found { print }
+  ' "${VERSIONS_FILE}" | sed '/^[[:space:]]*$/d'
+)"
+
+if [[ -z "${section_body}" ]]; then
+  echo "ERROR: latest ${VERSIONS_FILE} section is empty." >&2
+  exit 1
+fi
+
+commit_message="${version_jump}"$'\n\n'"${section_body}"
+
+echo "Branch: ${branch}"
+echo "Changed files:"
+git status --short
+echo
+echo "Commit message:"
+echo '----------------------------------------'
+printf '%s\n' "${commit_message}"
+echo '----------------------------------------'
+echo
+
+read -r -p "Approve, commit and push these changes? [y/N] " answer
+case "${answer}" in
+  y|Y|yes|YES) ;;
+  *) echo "Cancelled."; exit 0 ;;
+esac
+
+git add -A
+if git diff --cached --quiet; then
+  echo "No staged changes to commit."
+  exit 0
+fi
+
+git commit -m "${commit_message}"
+
+if ! git remote get-url origin >/dev/null 2>&1; then
+  echo "Commit created locally. No 'origin' remote: push skipped."
+elif git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1; then
+  git push
+else
+  git push -u origin "${branch}"
+fi
+
+echo "Done."
