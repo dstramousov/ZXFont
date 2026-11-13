@@ -119,6 +119,16 @@ public:
     void setFont(Font font) noexcept;
 
     /**
+     * @brief Set extra horizontal pixels between neighboring glyphs.
+     *
+     * Spacing applies between all printable glyphs, including spaces, but
+     * never after the final glyph of a line or across LF. Each queued text
+     * command captures the current spacing independently of later changes.
+     * The default is zero (the historical monospace advance).
+     */
+    void setLetterSpacing(std::uint32_t pixels) noexcept;
+
+    /**
      * @brief Select an external PSF2 font with built-in fallback.
      *
      * On a missing, unreadable, or invalid file, selects the embedded ZX
@@ -180,6 +190,7 @@ private:
         std::u32string value;
         Color color;
         Font font;
+        std::uint32_t letter_spacing = 0;
         bool indexed = false;
         ColorIndex index{0};
     };
@@ -190,6 +201,7 @@ private:
     std::uint32_t width_;
     std::uint32_t height_;
     Font font_;
+    std::uint32_t letter_spacing_ = 0;
     Palette palette_ = Palette::MonoGreen;
     std::vector<TextCommand> commands_;
 };

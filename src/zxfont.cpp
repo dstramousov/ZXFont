@@ -118,6 +118,10 @@ std::uint32_t Context::height() const noexcept { return height_; }
 
 void Context::setFont(Font font) noexcept { font_ = std::move(font); }
 
+void Context::setLetterSpacing(std::uint32_t pixels) noexcept {
+    letter_spacing_ = pixels;
+}
+
 bool Context::setFont(const std::filesystem::path& path, std::string* error) {
     try {
         Font loaded = Font::loadPsf2(path);
@@ -170,7 +174,7 @@ void Context::appendText(int x, int y, std::string_view value, Color color,
         }
     }
     commands_.push_back(TextCommand{x, y, std::move(decoded), color, font_,
-                                    indexed, index});
+                                    letter_spacing_, indexed, index});
 }
 
 void Context::clear() noexcept { commands_.clear(); }
@@ -184,19 +188,24 @@ void Context::render(Surface target) const {
                                            : command.color;
         const auto glyph_width = command.font.glyphWidth();
         const auto glyph_height = command.font.glyphHeight();
-        for (const auto codepoint : command.value) {
+        for (std::size_t i = 0; i < command.value.size(); ++i) {
+            const auto codepoint = command.value[i];
             if (codepoint == U'\n') {
                 x = command.x;
                 advance(y, glyph_height);
                 continue;
             }
-            if (x < width_ && x + glyph_width > 0 &&
-                y < height_ && y + glyph_height > 0) {
+            // Compare without addition to keep saturated positions safe.
+            if (x < width_ && x > -static_cast<std::int64_t>(glyph_width) &&
+                y < height_ && y > -static_cast<std::int64_t>(glyph_height)) {
                 drawGlyph(target, width_, height_, x, y,
                           command.font.bitmap(codepoint), glyph_width,
                           glyph_height, command.font.bytesPerRow(), color);
             }
             advance(x, glyph_width);
+            if (i + 1 < command.value.size() && command.value[i + 1] != U'\n') {
+                advance(x, command.letter_spacing);
+            }
         }
     }
 }

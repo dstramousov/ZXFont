@@ -4,7 +4,7 @@ ZXFont is a C++20 bitmap-text library intended for retro games, terminals and
 character interfaces. Its core is independent of graphics/window libraries;
 SDL3 is used only by two optional visual test applications.
 
-**Current version: v0.0.9.** This milestone provides a compact `zx::Context`
+**Current version: v0.0.10.** This milestone provides a compact `zx::Context`
 API, embedded ZX Spectrum Unicode 8x8 glyphs, strict UTF-8 decoding, PSF2 Unicode
 font loading, RGBA8 framebuffer rendering and four switchable 16-color
 palettes. GUI widgets are not implemented yet; SDL3 display glue remains demo-only.
@@ -39,6 +39,7 @@ render ASCII frames with ZXFont until actual box primitives are added.
 | `F1` | Toggle help | Toggle help |
 | `F2` | Switch color palette | Switch overlay color palette |
 | `F3` | Switch Spectrum 8×8 / Compact Airy 6×8 | Switch Spectrum 8×8 / Compact Airy 6×8 |
+| `F4` | Cycle Compact Airy letter spacing 0/1/2 px | Cycle Compact Airy letter spacing 0/1/2 px |
 | `F5` | Change conversation / view font matrix | Change dialogue / view font matrix |
 | `F11` | Toggle fullscreen | Toggle fullscreen |
 | `Space` | — | Show/hide dialogue |
@@ -60,7 +61,9 @@ F2 cycles Green, Amber, ZX, VGA. F3 switches between the **embedded**
 Spectrum Unicode 8x8 and the **external** Compact Airy 6x8. F5 shows
 font diagnostic scenes in both applications. The PSF2 assets are copied to
 `build/fonts/` when demos or tests are configured. Border glyphs remain on
-an independent 8x8 grid while dialogue text switches to 6x8.
+an independent 8x8 grid while dialogue text switches to 6x8. Compact
+text uses 1 px extra space by default; F4 cycles through 0, 1, 2 px when
+Compact is selected. Spectrum 8x8 retains its original 0 px spacing.
 If the compact file cannot be opened or validated, the demo keeps the built-in
 font and reports the problem to stderr instead of terminating.
 Pixel-perfect output uses whole-number scaling whenever the canvas fits the
@@ -118,6 +121,10 @@ Unicode mappings and include all requested glyphs. On an absent or invalid exter
 `Context::setFont(path, &error)` automatically selects the built-in 8x8 and
 returns `false`; `Font::loadPsf2()` remains strict and throws. Missing
 individual Unicode glyphs are still errors, not silently substituted.
+`Context::setLetterSpacing(pixels)` changes only the space between adjacent
+glyphs in subsequently queued text. It does not alter glyph bitmaps, does
+not add space at line ends, and preserves already queued commands. The
+default is 0 px for backward compatibility.
 Different fonts can be mixed **within the same frame** by calling `setFont()` between `text()` commands; commands keep
 their selected font and glyph dimensions. No extra API is needed. See
 [docs/API.md](docs/API.md) for validation, text and glyph behavior, and

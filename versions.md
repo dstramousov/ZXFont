@@ -66,3 +66,11 @@
 - Switch F3 between distinct 8x8 and 6x8 fonts in both SDL3 demos while preserving 8x8 border geometry.
 - Add focused font coverage, failure/fallback, bitmap and mixed-font regression tests plus reproducible font generator.
 - Document font source, fallback behavior and updated visual controls.
+
+## v0.0.9 -> v0.0.10
+
+- Add `Context::setLetterSpacing(uint32_t)` with 0 px default and per-text-command snapshots.
+- Apply spacing only between adjacent glyphs, preserving LF positions, font bitmaps, and existing palette behavior.
+- Give Compact Airy 6x8 a 1 px default gap in both SDL3 demos; F4 cycles 0 / 1 / 2 px.
+- Preserve 0 px spacing for embedded Spectrum 8x8 and independent 8x8 border rendering.
+- Add regression tests and document the new control without introducing layout or UI dependencies.

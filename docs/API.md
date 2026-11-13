@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.9)
+# ZXFont Core API (v0.0.10)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -33,6 +33,12 @@ ui.text(8, 40, "Кая", {255, 200, 100, 255});
 - `Font::glyphWidth()`, `glyphHeight()`, `hasGlyph(codepoint)` query coverage.
 - Glyph dimensions are 1..256 pixels per axis; font files are limited to 16 MiB.
 - Fonts are immutable, and copies share ownership of the underlying bitmaps.
+- `Context::setLetterSpacing(pixels)` selects extra horizontal pixels between
+  neighboring glyphs for subsequently queued commands. Default: 0. Spacing
+  includes ordinary space glyphs, excludes the end of each line, and does not
+  affect vertical LF advances. Already queued commands retain their spacing;
+  the bitmaps themselves do not change. The parameter is an unsigned pixel
+  count; large values safely move later glyphs outside the clipped canvas.
 - `Context::setFont(font)` affects subsequent text commands only. Previously
   queued text keeps the font it was originally submitted with. This already
   permits **different glyph dimensions within one frame** with no new API.
@@ -78,6 +84,8 @@ font is still 8x8. Compact Airy is an optional 6x8 external PSF2 asset
 (667 Unicode mappings). It is not automatically loaded by the library; the
 calling application chooses the path. No glyph-by-glyph fallback is performed.
 The SDL3 demos exercise F3 switches, loading failures, and fixed 8x8 borders.
+F4 cycles 0 / 1 / 2 px spacing for Compact Airy (initially 1); the built-in
+Spectrum font keeps 0 px spacing in the demos.
 Display scaling remains the host's responsibility.
 
 ## Palette-indexed colors
@@ -133,4 +141,5 @@ Both programs own and present their RGBA8 buffers using SDL3, which is **not**
 part of the `ZXFont::zxfont` interface. See `examples/` and `README.md`.
 F2 cycles the four palettes; F3 switches embedded ZX Spectrum Unicode 8x8
 against external Compact Airy 6x8; F5 shows glyph diagnostic scenes.
+F4 changes Compact Airy inter-glyph spacing; glyph dimensions remain 6x8.
 The SDL3 adapter preserves aspect ratio when resized or fullscreen.

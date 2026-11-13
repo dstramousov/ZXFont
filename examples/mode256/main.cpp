@@ -57,7 +57,8 @@ void drawWorld(demo::Frame& frame, int hero_x) {
 }
 
 void drawUi(zx::Context& ui, zx::Context& frames, bool help,
-            bool dialog, int scenario, zx::Palette palette, bool compact) {
+            bool dialog, int scenario, zx::Palette palette, bool compact,
+            std::uint32_t compact_spacing) {
     ui.text(8, 8, "HP: 100  LVL: 03", kHud);
     ui.text(176, 8, demo::paletteName(palette), kHud);
     if (help) {
@@ -65,7 +66,7 @@ void drawUi(zx::Context& ui, zx::Context& frames, bool help,
         ui.text(24, 136, "F1 HELP  F5 NEXT", kPanel);
         ui.text(24, 144, "SPACE HIDE DIALOG", kPanel);
         ui.text(24, 152, "F2 COLOR F3 FONT", kPanel);
-        ui.text(24, 160, "F11 FULLSCREEN", kPanel);
+        ui.text(24, 160, "F4 COMPACT GAP F11 FULL", kPanel);
         return;
     }
     if (!dialog) {
@@ -75,6 +76,9 @@ void drawUi(zx::Context& ui, zx::Context& frames, bool help,
         // Full-size typography diagnostics, confined to this 256x192 host.
         demo::box(frames, 1, 4, 30, 19, kPanel);
         ui.text(16, 40, compact ? "COMPACT AIRY / 6X8" : "SPECTRUM / 8X8", kHud);
+        if (compact) {
+            ui.text(168, 40, "GAP " + std::to_string(compact_spacing), kHud);
+        }
         ui.text(16, 56, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", kPanel);
         ui.text(16, 64, "abcdefghijklmnopqrstuvwxyz", kPanel);
         ui.text(16, 80, "АБВГДЕЁЖЗИЙКЛМНОПР", kPanel);
@@ -95,7 +99,7 @@ void drawUi(zx::Context& ui, zx::Context& frames, bool help,
                                    "реален без наблюдателя?", kPanel);
     } else if (scenario == 1) {
         ui.text(24, 136, "ДИМАС:", kHud);
-        ui.text(24, 152, compact ? "Я не знаю, но готов проверить" :
+        ui.text(24, 152, compact ? "Я не знаю, но проверю." :
                                    "Я не знаю. Но готов", kPanel);
         ui.text(24, 160, compact ? "Это можно проверить." :
                                    "это проверить.", kPanel);
@@ -116,6 +120,7 @@ int main() {
         zx::Context ui(kWidth, kHeight);
         zx::Context frames(kWidth, kHeight); // Fixed 8x8 border grid.
         bool use_compact = false;
+        std::uint32_t compact_spacing = 1;
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
         frames.setPalette(palette);
@@ -142,13 +147,21 @@ int main() {
                         case SDLK_F3:
                             if (use_compact) {
                                 ui.setFont(zx::Font{});
+                                ui.setLetterSpacing(0);
                                 use_compact = false;
                             } else {
                                 std::string error;
                                 use_compact = ui.setFont(demo::compactFontPath(), &error);
+                                ui.setLetterSpacing(use_compact ? compact_spacing : 0);
                                 if (!use_compact) {
                                     std::cerr << "Mode256 font fallback: " << error << '\n';
                                 }
+                            }
+                            break;
+                        case SDLK_F4:
+                            if (use_compact) {
+                                compact_spacing = (compact_spacing + 1) % 3;
+                                ui.setLetterSpacing(compact_spacing);
                             }
                             break;
                         case SDLK_F5: scenario = (scenario + 1) % 4; break;
@@ -179,7 +192,8 @@ int main() {
             }
             frames.clear();
             ui.clear();
-            drawUi(ui, frames, help, dialog, scenario, palette, use_compact);
+            drawUi(ui, frames, help, dialog, scenario, palette, use_compact,
+                   compact_spacing);
             frames.render(frame.surface());
             ui.render(frame.surface());
             display.present(frame.pixels());

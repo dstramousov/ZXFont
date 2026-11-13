@@ -19,7 +19,7 @@ constexpr zx::ColorIndex kBright{15};
 
 void drawTerminal(zx::Context& ui, zx::Context& frames, bool help,
                   int scenario, bool cursor_visible, zx::Palette palette,
-                  bool compact) {
+                  bool compact, std::uint32_t compact_spacing) {
     demo::box(frames, 2, 2, 76, 46, kDim);
     demo::rule(frames, 2, 6, 76, kDim);
     demo::rule(frames, 2, 42, 76, kDim);
@@ -35,7 +35,8 @@ void drawTerminal(zx::Context& ui, zx::Context& frames, bool help,
         ui.text(48, 136, "F1   - TOGGLE HELP", kText);
         ui.text(48, 160, "F2   - CHANGE PALETTE", kText);
         ui.text(48, 172, "F3   - SWITCH 8X8 / 6X8", kText);
-        ui.text(48, 184, "F5   - CHANGE DIALOGUE", kText);
+        ui.text(48, 184, "F4   - COMPACT SPACING 0/1/2", kText);
+        ui.text(48, 196, "F5   - CHANGE DIALOGUE", kText);
         ui.text(48, 208, "F11  - TOGGLE FULLSCREEN", kText);
         ui.text(48, 240, "The text and frames are rendered by ZXFont.", kDim);
         ui.text(48, 256, "SDL3 only presents the completed RGBA frame.", kDim);
@@ -69,14 +70,17 @@ void drawTerminal(zx::Context& ui, zx::Context& frames, bool help,
         ui.text(48, 252, "┌──────────┬──────────┐", kText);
         ui.text(48, 264, "│ █ ░ ▒ ▓│ ← ↑ → ↓  │", kText);
         ui.text(48, 276, "└──────────┴──────────┘", kText);
-        ui.text(48, 316, "F3: SPECTRUM 8X8 / COMPACT AIRY 6X8", kDim);
+        ui.text(48, 316, "F3 FONT / F4 COMPACT SPACING 0-2", kDim);
     }
 
+    if (compact) {
+        ui.text(480, 332, "SPACING: " + std::to_string(compact_spacing), kDim);
+    }
     ui.text(40, 352, ">", kBright);
     if (cursor_visible) {
         ui.text(56, 352, "_", kText);
     }
-    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 FONT | F5 SCENE | F11 FULL", kDim);
+    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 FONT | F4 SPACE | F5 SCENE | F11 FULL", kDim);
 }
 
 }  // namespace
@@ -89,6 +93,7 @@ int main() {
         zx::Context ui(kWidth, kHeight);
         zx::Context frames(kWidth, kHeight); // Borders stay aligned to 8x8 cells.
         bool use_compact = false;
+        std::uint32_t compact_spacing = 1;
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
         frames.setPalette(palette);
@@ -113,13 +118,21 @@ int main() {
                         case SDLK_F3:
                             if (use_compact) {
                                 ui.setFont(zx::Font{});
+                                ui.setLetterSpacing(0);
                                 use_compact = false;
                             } else {
                                 std::string error;
                                 use_compact = ui.setFont(demo::compactFontPath(), &error);
+                                ui.setLetterSpacing(use_compact ? compact_spacing : 0);
                                 if (!use_compact) {
                                     std::cerr << "Kaya font fallback: " << error << '\n';
                                 }
+                            }
+                            break;
+                        case SDLK_F4:
+                            if (use_compact) {
+                                compact_spacing = (compact_spacing + 1) % 3;
+                                ui.setLetterSpacing(compact_spacing);
                             }
                             break;
                         case SDLK_F5: scenario = (scenario + 1) % 3; break;
@@ -136,7 +149,7 @@ int main() {
             frames.clear();
             ui.clear();
             drawTerminal(ui, frames, help, scenario, (SDL_GetTicks() / 500) % 2 == 0,
-                         palette, use_compact);
+                         palette, use_compact, compact_spacing);
             frames.render(frame.surface());
             ui.render(frame.surface());
             display.present(frame.pixels());

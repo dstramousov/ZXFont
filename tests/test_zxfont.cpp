@@ -439,6 +439,77 @@ void testSpectrumUnicodeFont() {
     require(pixels[offset(18, 0, 24 * 4) + 3] == 255);
 }
 
+void testLetterSpacing() {
+    constexpr std::size_t kWidth = 72;
+    constexpr std::size_t kHeight = 40;
+    constexpr std::size_t kStride = kWidth * 4;
+    auto render = [](const zx::Context& ui) {
+        std::array<std::uint8_t, kWidth * kHeight * 4> pixels{};
+        ui.render({pixels, kWidth, kHeight, kStride});
+        return pixels;
+    };
+
+    // Zero extra spacing remains pixel-identical to the pre-existing API.
+    for (std::uint32_t gap : {0u, 1u, 2u}) {
+        zx::Context ui(kWidth, kHeight);
+        ui.setLetterSpacing(gap);
+        ui.text(2, 1, "AB", zx::ColorIndex{10});
+
+        zx::Context reference(kWidth, kHeight);
+        reference.text(2, 1, "A", zx::ColorIndex{10});
+        reference.text(10 + static_cast<int>(gap), 1, "B", zx::ColorIndex{10});
+        require(render(ui) == render(reference));
+    }
+
+    // Spacing applies after a space, but never before a newline or at the
+    // end of a line. LF still advances exactly one glyph cell vertically.
+    zx::Context spaced(kWidth, kHeight);
+    spaced.setLetterSpacing(2);
+    spaced.text(2, 1, "A B\nBA");
+    zx::Context reference(kWidth, kHeight);
+    reference.text(2, 1, "A");
+    reference.text(22, 1, "B"); // A + ' ' with 8px advance + 2px gap each.
+    reference.text(2, 9, "B");
+    reference.text(12, 9, "A");
+    require(render(spaced) == render(reference));
+
+    // Later spacing changes must not move already queued commands.
+    zx::Context snapshot(kWidth, kHeight);
+    snapshot.text(2, 1, "AB");
+    snapshot.setLetterSpacing(1);
+    snapshot.text(2, 12, "AB");
+    snapshot.setLetterSpacing(2);
+    snapshot.text(2, 23, "AB");
+    zx::Context expected(kWidth, kHeight);
+    for (int row = 0; row < 3; ++row) {
+        const int y = 1 + row * 11;
+        expected.text(2, y, "A");
+        expected.text(10 + row, y, "B");
+    }
+    require(render(snapshot) == render(expected));
+
+    // Arbitrary unsigned spacing must be clipped safely (no wraparound).
+    zx::Context huge(kWidth, kHeight);
+    huge.setLetterSpacing(UINT32_MAX);
+    huge.text(2, 1, "AB");
+    zx::Context first_only(kWidth, kHeight);
+    first_only.text(2, 1, "A");
+    require(render(huge) == render(first_only));
+
+    // The same API applies to an external 6x8 Cyrillic font.
+    zx::Font compact = zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH);
+    require(compact.glyphWidth() == 6 && compact.glyphHeight() == 8);
+    zx::Context compact_ui(kWidth, kHeight);
+    compact_ui.setFont(compact);
+    compact_ui.setLetterSpacing(1);
+    compact_ui.text(2, 1, "ЯЖ");
+    zx::Context compact_ref(kWidth, kHeight);
+    compact_ref.setFont(compact);
+    compact_ref.text(2, 1, "Я");
+    compact_ref.text(9, 1, "Ж");
+    require(render(compact_ui) == render(compact_ref));
+}
+
 }  // namespace
 
 int main() {
@@ -450,4 +521,5 @@ int main() {
     testExternalPsf2();
     testSpectrumUnicodeFont();
     testCompactFontAndFallback();
+    testLetterSpacing();
 }
