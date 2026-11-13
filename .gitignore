@@ -14,3 +14,6 @@ __pycache__/
 
 # Generated source snapshots
 ZXFont_v*_current.zip
+
+# Generated demo output
+/zxfont_demo.ppm
