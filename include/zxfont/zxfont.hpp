@@ -3,6 +3,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -32,6 +34,48 @@ struct Surface {
 };
 
 /**
+ * @brief Immutable, shareable monospace bitmap font.
+ *
+ * Copies share glyph data. The default font contains ASCII and common
+ * Cyrillic glyphs; external PSF2 fonts require a Unicode character table.
+ */
+class Font {
+public:
+    /** @brief Construct the built-in 8x8 ASCII/Cyrillic font. */
+    Font();
+
+    /**
+     * @brief Load a PSF2 font with a Unicode mapping table from disk.
+     *
+     * Accepts glyphs up to 256x256 and files up to 16 MiB. PSF2 character
+     * sequences are skipped because ZXFont draws individual codepoints only.
+     *
+     * @throws std::runtime_error If the file cannot be read.
+     * @throws std::invalid_argument If the font data is malformed or unsupported.
+     */
+    [[nodiscard]] static Font loadPsf2(const std::filesystem::path& path);
+
+    /** @brief Glyph cell width in pixels. */
+    [[nodiscard]] std::uint32_t glyphWidth() const noexcept;
+
+    /** @brief Glyph cell height in pixels. */
+    [[nodiscard]] std::uint32_t glyphHeight() const noexcept;
+
+    /** @brief Return whether the font contains a Unicode codepoint. */
+    [[nodiscard]] bool hasGlyph(char32_t codepoint) const noexcept;
+
+private:
+    struct Data;
+    std::shared_ptr<const Data> data_;
+
+    explicit Font(std::shared_ptr<const Data> data) noexcept;
+    [[nodiscard]] const std::uint8_t* bitmap(char32_t codepoint) const noexcept;
+    [[nodiscard]] std::size_t bytesPerRow() const noexcept;
+
+    friend class Context;
+};
+
+/**
  * @brief Stores text drawing commands for a logical pixel-sized canvas.
  *
  * This context does not own a framebuffer or an application window. Rendering
@@ -49,13 +93,21 @@ public:
     [[nodiscard]] std::uint32_t height() const noexcept;
 
     /**
-     * @brief Add a text command at pixel coordinates.
+     * @brief Select a font for subsequently queued text commands.
      *
-     * Supports printable ASCII and LF. Newlines reset x and advance y by 8.
-     * All other control bytes and non-ASCII input are rejected for now.
-     * The built-in public-domain font has fixed 8x8 glyphs.
+     * Previously queued commands keep their own fonts, so changing fonts
+     * never changes the appearance of already queued text.
+     */
+    void setFont(Font font) noexcept;
+
+    /**
+     * @brief Add UTF-8 text at pixel coordinates, using the selected font.
      *
-     * @throws std::invalid_argument If text contains unsupported bytes.
+     * LF resets x and advances y by the active font's glyph height. Only
+     * glyphs in the selected font can be drawn; no implicit substitutions.
+     *
+     * @throws std::invalid_argument For invalid UTF-8, unsupported glyphs,
+     *                               or control characters other than LF.
      */
     void text(int x, int y, std::string_view value, Color color = {});
 
@@ -78,12 +130,14 @@ private:
     struct TextCommand {
         int x;
         int y;
-        std::string value;
+        std::u32string value;
         Color color;
+        Font font;
     };
 
     std::uint32_t width_;
     std::uint32_t height_;
+    Font font_;
     std::vector<TextCommand> commands_;
 };
 

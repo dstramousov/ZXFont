@@ -1,23 +1,25 @@
 # ZXFont
 
-ZXFont is an experimental C++20 bitmap-font and character-UI library. The
-core is independent of windowing libraries; SDL3 is a planned optional backend.
+ZXFont is a C++20 bitmap-text library intended for retro games, terminals and
+character interfaces. Its core is independent of graphics/window libraries;
+SDL3 is a planned optional backend.
 
-**Current version: v0.0.3.** This milestone implements only a compact drawing
-API and a built-in 8x8 printable-ASCII font rendered into a caller-owned RGBA8
-pixel buffer. It has no window, SDL3 dependency, UTF-8 or UI widgets yet.
+**Current version: v0.0.4.** This milestone provides a compact `zx::Context`
+API, embedded 8x8 ASCII/Cyrillic glyphs, strict UTF-8 decoding, PSF2 Unicode
+font loading and RGBA8 framebuffer rendering. GUI widgets, palettes and SDL3
+rendering have not yet been implemented.
 
 ## Build and test
 
 Requirements: CMake >= 3.21, Ninja, a C++20 compiler.
 
 ```bash
-./m               # Configure and build Debug
-./m test          # Build and run CTest tests
-./build/zxfont_basic  # Write zxfont_demo.ppm to the working directory
+./m                    # Configure and build Debug
+./m test               # Run CTest tests
+./build/zxfont_basic   # Write zxfont_demo.ppm to the current directory
 ```
 
-For other build modes: `./m release`, `./m profile`, `./m rebuild`, `./m clean`.
+Other modes: `./m release`, `./m profile`, `./m rebuild`, `./m clean`.
 
 ## Integrating in another CMake project
 
@@ -32,32 +34,43 @@ target_link_libraries(my_app PRIVATE ZXFont::zxfont)
 std::vector<std::uint8_t> pixels(256 * 192 * 4, 0);
 zx::Context ui(256, 192);
 ui.text(8, 8, "HELLO ZXFONT", {0, 255, 0, 255});
+ui.text(8, 24, "Привет, Кая!");
 ui.render({pixels, 256, 192, 256 * 4});
 ```
 
-See [docs/API.md](docs/API.md) for ownership, alpha and clipping rules.
+Change the font without changing the rendering API:
+
+```cpp
+zx::Font font = zx::Font::loadPsf2("my_font.psf");
+ui.setFont(font);
+ui.text(8, 40, "Кая");
+```
+
+PSF2 fonts must have Unicode mappings and include all requested glyphs. See
+[docs/API.md](docs/API.md) for validation, text and glyph behavior, and
+[docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) for bitmap attribution.
 
 ## Development scripts
 
-Scripts resolve the repository root independently of the current directory.
+Scripts resolve the repository root independently of the working directory.
 
 | Command | Purpose |
 | --- | --- |
-| `./a` | Package current source as `../ZXFont_vX.Y.Z_current.zip`. |
-| `./appr` | Review changes, commit with the latest `versions.md` entry and push. |
+| `./a` | Package source as `../ZXFont_vX.Y.Z_current.zip`. |
+| `./appr` | Review, commit using the newest `versions.md` entry and push. |
 | `./m` | Configure and build Debug with CMake/Ninja. |
 | `./m release` | Configure and build Release. |
-| `./m profile` | Configure and build RelWithDebInfo. |
+| `./m profile` | Build RelWithDebInfo. |
 | `./m rebuild` | Remove `build/` and rebuild Debug. |
 | `./m clean` | Remove `build/`. |
 | `./m test` | Build and run CTest tests. |
 
-Other requirements for tooling: Bash, Git, and `zip`.
+Other requirements for tooling: Bash, Git and `zip`.
 
 ## Patch-based workflow
 
 1. Supply the current `ZXFont_vX.Y.Z_current.zip` as the source of truth.
-2. Discuss one focused change and the next patch version.
+2. Agree on one focused change and the next patch version.
 3. From the repository root, apply the delivered patch:
 
    ```bash
@@ -65,8 +78,8 @@ Other requirements for tooling: Bash, Git, and `zip`.
    git apply ~/Downloads/ZXFont_vX.Y.Z.patch
    ```
 
-4. Validate with `./m` and `./m test`; approve the commit with `./appr`.
-5. Create the next current-source archive with `./a`.
+4. Validate with `./m` and `./m test`; approve using `./appr`.
+5. Create the next source archive using `./a`.
 
 Every patch increments the final version component by one and updates
 `versions.md` and the CMake project version.

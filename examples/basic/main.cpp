@@ -23,6 +23,8 @@ int main(int argc, char** argv) {
     ui.text(8, 8, "HELLO ZXFONT", {25, 240, 100, 255});
     ui.text(8, 32, "Pixel buffer / C++20", {90, 190, 125, 255});
     ui.text(8, 48, "0123456789 !?.,:;", {90, 190, 125, 255});
+    ui.text(8, 72, "ПРИВЕТ, КАЯ!", {25, 240, 100, 255});
+    ui.text(8, 88, "Українська: Її Єє Ґґ", {90, 190, 125, 255});
     ui.render({std::span<std::uint8_t>(framebuffer), width, height, width * 4});
 
     std::ofstream file(output, std::ios::binary);

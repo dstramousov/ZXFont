@@ -17,3 +17,11 @@
 - Add a small Context API that renders 8x8 ASCII text into caller-owned RGBA8 buffers.
 - Implement clipping, stride validation, alpha blending and basic error handling.
 - Add a no-window PPM demo, headless tests, and API/font provenance documentation.
+
+## v0.0.3 -> v0.0.4
+
+- Separate shareable bitmap Font data from the text renderer without changing the existing text/render API.
+- Decode UTF-8 strictly and support built-in 8x8 Cyrillic characters alongside ASCII.
+- Add external PSF2 Unicode font loading and per-command font snapshots via Context::setFont.
+- Extend tests for Cyrillic, font switching, non-8-bit widths, malformed UTF-8 and invalid font files.
+- Update the headless demonstration, API documentation and font provenance.

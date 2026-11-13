@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
-#include <stdexcept>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -34,7 +36,7 @@ void testCanvasAndText() {
     require(ui.width() == 16 && ui.height() == 16);
     require(throws<std::invalid_argument>([] { zx::Context invalid(0, 12); }));
     require(throws<std::invalid_argument>([&] { ui.text(0, 0, "\t"); }));
-    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "\xD0\x9A"); }));
+    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "\xD0"); }));
 
     constexpr std::size_t stride = 16 * 4 + 8;
     std::vector<std::uint8_t> pixels(stride * 16, 0);
@@ -107,10 +109,132 @@ void testSurfaceValidation() {
     }));
 }
 
+
+void testUnicodeAndSnapshot() {
+    zx::Font builtin;
+    require(builtin.glyphWidth() == 8 && builtin.glyphHeight() == 8);
+    for (char32_t cp : U"Привет, Кая! Її Єє Ґґ Йё") {
+        if (cp != 0) {
+            require(builtin.hasGlyph(cp));
+        }
+    }
+    require(!builtin.hasGlyph(U'🎯'));
+
+    zx::Context ui(96, 24);
+    ui.text(0, 0, "Привет, Кая!", {0, 255, 0, 255});
+    ui.text(0, 8, "Її Єє Ґґ Йё", {255, 255, 255, 255});
+    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "🎯"); }));
+    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "\xC0\x80"); }));
+    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "\xED\xA0\x80"); }));
+    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "\xF4\x90\x80\x80"); }));
+    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "\xE2\x28\xA1"); }));
+    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "\r"); }));
+
+    std::vector<std::uint8_t> pixels(96 * 24 * 4);
+    ui.render({pixels, 96, 24, 96 * 4});
+    auto count_opaque = [](const auto& image, std::size_t first_row,
+                           std::size_t last_row) {
+        std::size_t count = 0;
+        for (std::size_t y = first_row; y < last_row; ++y) {
+            for (std::size_t x = 0; x < 96; ++x) {
+                count += image[offset(x, y, 96 * 4) + 3] != 0;
+            }
+        }
+        return count;
+    };
+    require(count_opaque(pixels, 0, 8) > 10);
+    require(count_opaque(pixels, 8, 16) > 10);
+}
+
+void appendLe32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        bytes.push_back(static_cast<std::uint8_t>(value >> shift));
+    }
+}
+
+std::vector<std::uint8_t> makePsf2() {
+    std::vector<std::uint8_t> bytes;
+    appendLe32(bytes, 0x864AB572);  // magic
+    appendLe32(bytes, 0);           // version
+    appendLe32(bytes, 32);          // header size
+    appendLe32(bytes, 1);           // Unicode table flag
+    appendLe32(bytes, 2);           // glyph count
+    appendLe32(bytes, 16);          // bytes per glyph: 9x8, 2 bytes/row
+    appendLe32(bytes, 8);           // height
+    appendLe32(bytes, 9);           // width
+    for (int i = 0; i < 8; ++i) {
+        bytes.push_back(0x80); // leftmost pixel
+        bytes.push_back(0x80); // ninth pixel
+    }
+    for (int i = 0; i < 8; ++i) {
+        bytes.push_back(0x40);
+        bytes.push_back(0x00);
+    }
+    bytes.insert(bytes.end(), {'A', 'B', 0xFF, 0xD0, 0x96, 0xFF});
+    return bytes;
+}
+
+void testExternalPsf2() {
+    const auto path = std::filesystem::current_path() / "zxfont_test_external.psf";
+    struct RemoveFile {
+        std::filesystem::path path;
+        ~RemoveFile() { std::error_code ec; std::filesystem::remove(path, ec); }
+    } cleanup{path};
+
+    auto writeFont = [&](const std::vector<std::uint8_t>& bytes) {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        require(static_cast<bool>(file));
+        file.write(reinterpret_cast<const char*>(bytes.data()),
+                   static_cast<std::streamsize>(bytes.size()));
+        file.close();
+        require(static_cast<bool>(file));
+    };
+
+    const auto valid = makePsf2();
+    writeFont(valid);
+    auto loaded = zx::Font::loadPsf2(path);
+    require(loaded.glyphWidth() == 9 && loaded.glyphHeight() == 8);
+    require(loaded.hasGlyph(U'A') && loaded.hasGlyph(U'B') && loaded.hasGlyph(U'Ж'));
+    require(!loaded.hasGlyph(U'Z'));
+
+    zx::Context ui(27, 16);
+    ui.text(0, 0, "A", {255, 0, 0, 255});  // built-in font snapshot
+    ui.setFont(loaded);
+    ui.text(9, 0, "BЖ", {0, 255, 0, 255});
+    ui.text(0, 8, "Ж");
+    require(throws<std::invalid_argument>([&] { ui.text(0, 0, "Z"); }));
+    std::vector<std::uint8_t> pixels(27 * 16 * 4);
+    ui.render({pixels, 27, 16, 27 * 4});
+    require(pixels[offset(2, 0, 27 * 4)] == 255);  // built-in A unchanged
+    require(pixels[offset(9, 0, 27 * 4) + 1] == 255);  // PSF2 glyph, col 0
+    require(pixels[offset(17, 0, 27 * 4) + 1] == 255); // PSF2 glyph, col 8
+    require(pixels[offset(19, 0, 27 * 4) + 1] == 255); // Cyrillic glyph, col 1
+    require(pixels[offset(1, 8, 27 * 4) + 3] == 255);
+
+    auto invalid = valid;
+    invalid[12] = 0;  // no Unicode table flag
+    writeFont(invalid);
+    require(throws<std::invalid_argument>([&] { (void)zx::Font::loadPsf2(path); }));
+    invalid = valid;
+    invalid.pop_back();  // missing final terminator
+    writeFont(invalid);
+    require(throws<std::invalid_argument>([&] { (void)zx::Font::loadPsf2(path); }));
+    invalid = valid;
+    invalid[24] = 0;  // zero height
+    writeFont(invalid);
+    require(throws<std::invalid_argument>([&] { (void)zx::Font::loadPsf2(path); }));
+    invalid = valid;
+    invalid[68] = 0xC0;  // invalid UTF-8 leading byte in Unicode table
+    writeFont(invalid);
+    require(throws<std::invalid_argument>([&] { (void)zx::Font::loadPsf2(path); }));
+}
+
 }  // namespace
 
 int main() {
     testCanvasAndText();
     testClippingAndBlending();
     testSurfaceValidation();
+    testUnicodeAndSnapshot();
+    testExternalPsf2();
 }

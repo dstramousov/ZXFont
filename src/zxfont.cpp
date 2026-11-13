@@ -1,16 +1,15 @@
 #include "zxfont/zxfont.hpp"
 
-#include "basic_ascii_8x8.hpp"
+#include "utf8.hpp"
 
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace zx {
 namespace {
 
 constexpr std::size_t kChannelsPerPixel = 4;
-constexpr std::int64_t kGlyphWidth = 8;
-constexpr std::int64_t kGlyphHeight = 8;
 
 void validateSurface(const Surface& target, std::uint32_t required_width,
                      std::uint32_t required_height) {
@@ -73,22 +72,35 @@ void blendPixel(std::uint8_t* destination, Color source) noexcept {
 
 void drawGlyph(Surface target, std::uint32_t canvas_width,
                std::uint32_t canvas_height, std::int64_t x, std::int64_t y,
-               unsigned char glyph, Color color) noexcept {
-    for (std::int64_t row = 0; row < kGlyphHeight; ++row) {
+               const std::uint8_t* glyph, std::uint32_t glyph_width,
+               std::uint32_t glyph_height, std::size_t bytes_per_row,
+               Color color) noexcept {
+    for (std::uint32_t row = 0; row < glyph_height; ++row) {
         const auto py = y + row;
         if (py < 0 || py >= canvas_height) {
             continue;
         }
-        const auto bits = detail::kBasicAscii8x8[glyph - 32][row];
-        for (std::int64_t col = 0; col < kGlyphWidth; ++col) {
+        const auto* row_bits = glyph + static_cast<std::size_t>(row) * bytes_per_row;
+        for (std::uint32_t col = 0; col < glyph_width; ++col) {
             const auto px = x + col;
-            if (px < 0 || px >= canvas_width || (bits & (1u << col)) == 0) {
+            if (px < 0 || px >= canvas_width ||
+                (row_bits[col / 8] & (0x80u >> (col % 8))) == 0) {
                 continue;
             }
             const auto offset = static_cast<std::size_t>(py) * target.stride_bytes +
                                 static_cast<std::size_t>(px) * kChannelsPerPixel;
             blendPixel(target.pixels.data() + offset, color);
         }
+    }
+}
+
+// Avoid overflowing signed pixel positions when a huge command is clipped.
+void advance(std::int64_t& position, std::uint32_t delta) noexcept {
+    const auto max = std::numeric_limits<std::int64_t>::max();
+    if (position > max - delta) {
+        position = max;
+    } else {
+        position += delta;
     }
 }
 
@@ -104,14 +116,22 @@ Context::Context(std::uint32_t width, std::uint32_t height)
 std::uint32_t Context::width() const noexcept { return width_; }
 std::uint32_t Context::height() const noexcept { return height_; }
 
+void Context::setFont(Font font) noexcept { font_ = std::move(font); }
+
 void Context::text(int x, int y, std::string_view value, Color color) {
-    for (const auto ch : value) {
-        const auto byte = static_cast<unsigned char>(ch);
-        if ((byte < 32 || byte > 126) && byte != '\n') {
-            throw std::invalid_argument("Only printable ASCII and LF are supported");
+    std::u32string decoded;
+    decoded.reserve(value.size());
+    std::size_t pos = 0;
+    while (pos < value.size()) {
+        const auto codepoint = detail::readCodepoint(value, pos);
+        if (codepoint == U'\n' || (codepoint >= 0x20 && codepoint != 0x7F &&
+                                     font_.hasGlyph(codepoint))) {
+            decoded.push_back(codepoint);
+        } else {
+            throw std::invalid_argument("Control character or missing font glyph");
         }
     }
-    commands_.push_back(TextCommand{x, y, std::string(value), color});
+    commands_.push_back(TextCommand{x, y, std::move(decoded), color, font_});
 }
 
 void Context::clear() noexcept { commands_.clear(); }
@@ -121,18 +141,21 @@ void Context::render(Surface target) const {
     for (const auto& command : commands_) {
         std::int64_t x = command.x;
         std::int64_t y = command.y;
-        for (const auto ch : command.value) {
-            if (ch == '\n') {
+        const auto glyph_width = command.font.glyphWidth();
+        const auto glyph_height = command.font.glyphHeight();
+        for (const auto codepoint : command.value) {
+            if (codepoint == U'\n') {
                 x = command.x;
-                y += kGlyphHeight;
+                advance(y, glyph_height);
                 continue;
             }
-            if (x < width_ && x + kGlyphWidth > 0 &&
-                y < height_ && y + kGlyphHeight > 0) {
+            if (x < width_ && x + glyph_width > 0 &&
+                y < height_ && y + glyph_height > 0) {
                 drawGlyph(target, width_, height_, x, y,
-                          static_cast<unsigned char>(ch), command.color);
+                          command.font.bitmap(codepoint), glyph_width,
+                          glyph_height, command.font.bytesPerRow(), command.color);
             }
-            x += kGlyphWidth;
+            advance(x, glyph_width);
         }
     }
 }
