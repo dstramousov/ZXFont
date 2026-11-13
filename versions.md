@@ -74,3 +74,10 @@
 - Give Compact Airy 6x8 a 1 px default gap in both SDL3 demos; F4 cycles 0 / 1 / 2 px.
 - Preserve 0 px spacing for embedded Spectrum 8x8 and independent 8x8 border rendering.
 - Add regression tests and document the new control without introducing layout or UI dependencies.
+
+## v0.0.10 -> v0.0.11
+
+- Add UTF-8-aware pixel measurement and word wrapping through `measureText()` and `textBox()`.
+- Respect selected font metrics, letter spacing, explicit newlines, and overlong words.
+- Render dialogue text using the same layout path in Kaya Terminal and Mode256 Simulator.
+- Add regression tests for wrapping, errors, per-command font snapshots, and metrics.

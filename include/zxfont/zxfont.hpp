@@ -93,6 +93,13 @@ private:
     friend class Context;
 };
 
+/** @brief Pixel dimensions and line count of laid-out UTF-8 text. */
+struct TextMetrics {
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::size_t lines = 0;
+};
+
 /**
  * @brief Stores text drawing commands for a logical pixel-sized canvas.
  *
@@ -168,6 +175,34 @@ public:
      */
     void text(int x, int y, std::string_view value, ColorIndex color);
 
+    /**
+     * @brief Measure UTF-8 text using the current font and letter spacing.
+     *
+     * A zero max_width means no automatic wrapping (explicit LF is honored).
+     * A positive max_width wraps at spaces and splits oversized words. Spaces
+     * at wrap boundaries are discarded; explicit LF preserves empty lines.
+     * Empty text has zero width, height and lines.
+     *
+     * @throws std::invalid_argument For invalid text or too-narrow max_width.
+     * @throws std::overflow_error If the measured dimensions exceed uint32_t.
+     */
+    [[nodiscard]] TextMetrics measureText(std::string_view value,
+                                          std::uint32_t max_width = 0) const;
+
+    /**
+     * @brief Queue wrapped text inside a pixel-width text box.
+     *
+     * Uses the same layout as measureText(value, max_width). x/y are the top
+     * left of the first line. Text is clipped to the Context canvas, but not
+     * vertically clipped to an implicit box height.
+     */
+    void textBox(int x, int y, std::uint32_t max_width,
+                 std::string_view value, Color color = {});
+
+    /** @brief Palette-indexed overload of textBox. */
+    void textBox(int x, int y, std::uint32_t max_width,
+                 std::string_view value, ColorIndex color);
+
     /** @brief Remove all queued drawing commands without changing any pixels. */
     void clear() noexcept;
 
@@ -197,6 +232,9 @@ private:
 
     void appendText(int x, int y, std::string_view value, Color color,
                     bool indexed, ColorIndex index);
+    void appendBox(int x, int y, std::uint32_t max_width,
+                   std::string_view value, Color color, bool indexed,
+                   ColorIndex index);
 
     std::uint32_t width_;
     std::uint32_t height_;

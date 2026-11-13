@@ -2,6 +2,7 @@
 
 #include "utf8.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -104,6 +105,106 @@ void advance(std::int64_t& position, std::uint32_t delta) noexcept {
     }
 }
 
+std::u32string decodeText(std::string_view value, const Font& font) {
+    std::u32string decoded;
+    decoded.reserve(value.size());
+    std::size_t pos = 0;
+    while (pos < value.size()) {
+        const auto cp = detail::readCodepoint(value, pos);
+        if (cp == U'\n' || (cp >= 0x20 && cp != 0x7F && font.hasGlyph(cp))) {
+            decoded.push_back(cp);
+        } else {
+            throw std::invalid_argument("Control character or missing font glyph");
+        }
+    }
+    return decoded;
+}
+
+std::uint64_t linePixels(std::size_t count, std::uint32_t glyph_width,
+                         std::uint32_t spacing) {
+    if (count == 0) return 0;
+    return static_cast<std::uint64_t>(count) * glyph_width +
+           static_cast<std::uint64_t>(count - 1) * spacing;
+}
+
+struct LayoutResult {
+    std::u32string text;
+    TextMetrics metrics;
+};
+
+LayoutResult layoutText(const std::u32string& input, const Font& font,
+                        std::uint32_t spacing, std::uint32_t max_width) {
+    const auto gw = font.glyphWidth();
+    const auto gh = font.glyphHeight();
+    if (max_width != 0 && max_width < gw) {
+        throw std::invalid_argument("Text box narrower than glyph width");
+    }
+    if (input.empty()) return {};
+
+    std::vector<std::u32string> lines;
+    std::u32string line;
+    auto emit = [&] { lines.push_back(std::move(line)); line.clear(); };
+    auto fits = [&](std::size_t count) {
+        return max_width == 0 || linePixels(count, gw, spacing) <= max_width;
+    };
+
+    std::size_t i = 0;
+    while (i < input.size()) {
+        if (input[i] == U'\n') {
+            emit();
+            ++i;
+            continue;
+        }
+        // Preserve consecutive spaces within lines, but strip those at wraps.
+        if (input[i] == U' ') {
+            const auto begin = i;
+            while (i < input.size() && input[i] == U' ') ++i;
+            if (!line.empty()) {
+                const auto amount = i - begin;
+                if (fits(line.size() + amount)) {
+                    line.append(amount, U' ');
+                } else {
+                    emit();
+                }
+            }
+            continue;
+        }
+        const auto begin = i;
+        while (i < input.size() && input[i] != U' ' && input[i] != U'\n') ++i;
+        const auto word = input.substr(begin, i - begin);
+        if (!line.empty() && !fits(line.size() + word.size())) {
+            // Drop pending trailing separators on wrapped lines.
+            while (!line.empty() && line.back() == U' ') line.pop_back();
+            if (!line.empty()) emit();
+        }
+        for (const auto cp : word) {
+            if (!fits(line.size() + 1)) {
+                while (!line.empty() && line.back() == U' ') line.pop_back();
+                if (!line.empty()) emit();
+            }
+            line.push_back(cp);
+        }
+    }
+    emit();
+
+    LayoutResult result;
+    result.metrics.lines = lines.size();
+    std::uint64_t widest = 0;
+    for (std::size_t n = 0; n < lines.size(); ++n) {
+        widest = std::max(widest, linePixels(lines[n].size(), gw, spacing));
+        if (n != 0) result.text.push_back(U'\n');
+        result.text += lines[n];
+    }
+    const std::uint64_t height = static_cast<std::uint64_t>(lines.size()) * gh;
+    if (widest > std::numeric_limits<std::uint32_t>::max() ||
+        height > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::overflow_error("Text metrics exceed uint32_t");
+    }
+    result.metrics.width = static_cast<std::uint32_t>(widest);
+    result.metrics.height = static_cast<std::uint32_t>(height);
+    return result;
+}
+
 }  // namespace
 
 Context::Context(std::uint32_t width, std::uint32_t height)
@@ -161,20 +262,38 @@ void Context::text(int x, int y, std::string_view value, ColorIndex color) {
 
 void Context::appendText(int x, int y, std::string_view value, Color color,
                          bool indexed, ColorIndex index) {
-    std::u32string decoded;
-    decoded.reserve(value.size());
-    std::size_t pos = 0;
-    while (pos < value.size()) {
-        const auto codepoint = detail::readCodepoint(value, pos);
-        if (codepoint == U'\n' || (codepoint >= 0x20 && codepoint != 0x7F &&
-                                     font_.hasGlyph(codepoint))) {
-            decoded.push_back(codepoint);
-        } else {
-            throw std::invalid_argument("Control character or missing font glyph");
-        }
-    }
+    auto decoded = decodeText(value, font_);
     commands_.push_back(TextCommand{x, y, std::move(decoded), color, font_,
                                     letter_spacing_, indexed, index});
+}
+
+TextMetrics Context::measureText(std::string_view value,
+                                 std::uint32_t max_width) const {
+    return layoutText(decodeText(value, font_), font_, letter_spacing_,
+                      max_width).metrics;
+}
+
+void Context::textBox(int x, int y, std::uint32_t max_width,
+                      std::string_view value, Color color) {
+    appendBox(x, y, max_width, value, color, false, ColorIndex{0});
+}
+
+void Context::textBox(int x, int y, std::uint32_t max_width,
+                      std::string_view value, ColorIndex color) {
+    (void)paletteColor(palette_, color);
+    appendBox(x, y, max_width, value, Color{}, true, color);
+}
+
+void Context::appendBox(int x, int y, std::uint32_t max_width,
+                        std::string_view value, Color color, bool indexed,
+                        ColorIndex index) {
+    if (max_width == 0) {
+        throw std::invalid_argument("Text box width must be positive");
+    }
+    auto laid_out = layoutText(decodeText(value, font_), font_,
+                               letter_spacing_, max_width);
+    commands_.push_back(TextCommand{x, y, std::move(laid_out.text), color,
+                                    font_, letter_spacing_, indexed, index});
 }
 
 void Context::clear() noexcept { commands_.clear(); }

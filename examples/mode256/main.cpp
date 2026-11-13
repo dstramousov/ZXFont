@@ -93,20 +93,16 @@ void drawUi(zx::Context& ui, zx::Context& frames, bool help,
     demo::box(frames, 1, 16, 30, 7, kPanel);
     if (scenario == 0) {
         ui.text(24, 136, "КАЯ:", kHud);
-        ui.text(24, 152, compact ? "Ты уверен, что мир реален" :
-                                   "Ты уверен, что мир", kPanel);
-        ui.text(24, 160, compact ? "без наблюдателя?" :
-                                   "реален без наблюдателя?", kPanel);
+        ui.textBox(24, 152, 208,
+                   "Ты уверен, что мир реален без наблюдателя?", kPanel);
     } else if (scenario == 1) {
         ui.text(24, 136, "ДИМАС:", kHud);
-        ui.text(24, 152, compact ? "Я не знаю, но проверю." :
-                                   "Я не знаю. Но готов", kPanel);
-        ui.text(24, 160, compact ? "Это можно проверить." :
-                                   "это проверить.", kPanel);
+        ui.textBox(24, 152, 208,
+                   "Я не знаю. Но готов это проверить.", kPanel);
     } else {
         ui.text(24, 136, "КАЯ:", kHud);
-        ui.text(24, 152, "Главное - не путать", kPanel);
-        ui.text(24, 160, "гипотезу с фактом.", kPanel);
+        ui.textBox(24, 152, 208,
+                   "Главное - не путать гипотезу с фактом.", kPanel);
     }
 }
 

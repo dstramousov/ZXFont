@@ -510,6 +510,55 @@ void testLetterSpacing() {
     require(render(compact_ui) == render(compact_ref));
 }
 
+void testTextLayout() {
+    zx::Context ui(96, 64);
+    const auto empty = ui.measureText("");
+    require(empty.lines == 0 && empty.width == 0 && empty.height == 0);
+    const auto single = ui.measureText("Привет");
+    require(single.width == 48 && single.height == 8 && single.lines == 1);
+    const auto manual = ui.measureText("AB\n\nCD");
+    require(manual.width == 16 && manual.height == 24 && manual.lines == 3);
+    const auto wrapped = ui.measureText("AB CD EFGH", 32);
+    require(wrapped.width == 32 && wrapped.height == 24 && wrapped.lines == 3);
+    const auto hard = ui.measureText("ABCDE", 16);
+    require(hard.width == 16 && hard.height == 24 && hard.lines == 3);
+    require(throws<std::invalid_argument>([&] { (void)ui.measureText("A", 7); }));
+    require(throws<std::invalid_argument>([&] { (void)ui.measureText("\xD0", 32); }));
+    require(throws<std::invalid_argument>([&] { ui.textBox(0, 0, 0, "A"); }));
+    require(throws<std::invalid_argument>([&] { ui.textBox(0, 0, 16, "\t"); }));
+
+    auto render = [](const zx::Context& context) {
+        std::array<std::uint8_t, 96 * 64 * 4> pixels{};
+        context.render({pixels, 96, 64, 96 * 4});
+        return pixels;
+    };
+    ui.textBox(0, 0, 32, "AB CD EFGH", zx::ColorIndex{12});
+    zx::Context expected(96, 64);
+    expected.text(0, 0, "AB", zx::ColorIndex{12});
+    expected.text(0, 8, "CD", zx::ColorIndex{12});
+    expected.text(0, 16, "EFGH", zx::ColorIndex{12});
+    require(render(ui) == render(expected));
+
+    ui.clear();
+    ui.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    ui.setLetterSpacing(1);
+    const auto compact = ui.measureText("АБ ВГ", 20);
+    require(compact.lines == 2 && compact.width == 13 && compact.height == 16);
+    ui.textBox(0, 0, 20, "АБ ВГ");
+    zx::Context compact_ref(96, 64);
+    compact_ref.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    compact_ref.setLetterSpacing(1);
+    compact_ref.text(0, 0, "АБ");
+    compact_ref.text(0, 8, "ВГ");
+    require(render(ui) == render(compact_ref));
+
+    // Text submitted before changing the selected font must keep its layout.
+    ui.setFont(zx::Font{});
+    ui.setLetterSpacing(0);
+    require(render(ui) == render(compact_ref));
+    require(throws<std::invalid_argument>([&] { (void)ui.measureText("A", 5); }));
+}
+
 }  // namespace
 
 int main() {
@@ -522,4 +571,5 @@ int main() {
     testSpectrumUnicodeFont();
     testCompactFontAndFallback();
     testLetterSpacing();
+    testTextLayout();
 }

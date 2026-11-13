@@ -4,7 +4,7 @@ ZXFont is a C++20 bitmap-text library intended for retro games, terminals and
 character interfaces. Its core is independent of graphics/window libraries;
 SDL3 is used only by two optional visual test applications.
 
-**Current version: v0.0.10.** This milestone provides a compact `zx::Context`
+**Current version: v0.0.11.** This milestone provides a compact `zx::Context`
 API, embedded ZX Spectrum Unicode 8x8 glyphs, strict UTF-8 decoding, PSF2 Unicode
 font loading, RGBA8 framebuffer rendering and four switchable 16-color
 palettes. GUI widgets are not implemented yet; SDL3 display glue remains demo-only.
@@ -163,3 +163,10 @@ Other requirements for tooling: Bash, Git and `zip`.
 
 Every patch increments the final version component by one and updates
 `versions.md` and the CMake project version.
+
+### Text layout (v0.0.11)
+
+`Context::measureText(text, max_width)` reports pixel bounds and line count.
+`Context::textBox(x, y, max_width, text, color)` queues word-wrapped UTF-8.
+The active font dimensions and letter spacing determine both measurements and wraps.
+See `docs/API.md` for behavior and limits.

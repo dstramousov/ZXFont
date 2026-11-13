@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.10)
+# ZXFont Core API (v0.0.11)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -111,6 +111,32 @@ Changing the active palette affects indexed text **at render time**, without
 re-queuing it, changing its position, or modifying glyph bitmaps. Explicit
 RGBA text is not recolored. The host still owns its background and any
 non-ZXFont graphics: use `paletteColor()` when it wants matching colors.
+
+## Measuring and wrapping text (v0.0.11)
+
+`Context::measureText(text, max_width)` computes the pixel extent and line
+count using the **currently selected font and letter spacing**. `max_width=0`
+(default) respects explicit newlines without automatic wrapping. A positive
+width wraps on ASCII spaces; words longer than the width split at glyph
+boundaries. Explicit empty lines are preserved. Empty input returns all zeroes.
+A width smaller than one glyph is rejected. Measurements are independent of
+canvas size; the renderer still clips to the canvas.
+
+`textBox(x, y, max_width, text, color)` queues exactly the layout returned by
+`measureText(text, max_width)`, with either RGBA or `ColorIndex`. The text box
+has a horizontal limit but no implicit vertical clipping; callers should use
+`metrics.height` to place subsequent UI items and avoid collisions. Its font
+and spacing are snapshotted like regular `text()` commands.
+
+```cpp
+ui.setLetterSpacing(1);
+const auto metrics = ui.measureText("Привет, Кая! Как дела?", 120);
+ui.textBox(8, 120, 120, "Привет, Кая! Как дела?", zx::ColorIndex{12});
+// metrics.width <= 120, metrics.height is a multiple of glyphHeight().
+```
+
+The word separator is U+0020 SPACE. No hyphenation, tab expansion, Unicode
+line-break algorithm or shaping is provided in this version.
 
 ## Text behavior
 

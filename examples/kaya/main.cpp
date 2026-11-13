@@ -42,20 +42,20 @@ void drawTerminal(zx::Context& ui, zx::Context& frames, bool help,
         ui.text(48, 256, "SDL3 only presents the completed RGBA frame.", kDim);
     } else if (scenario == 0) {
         ui.text(48, 76, "КАЯ:", kBright);
-        ui.text(48, 92, "Ты уверен, что мир существует без наблюдателя?", kText);
+        ui.textBox(48, 92, 350, "Ты уверен, что мир существует без наблюдателя, даже когда никто на него не смотрит?", kText);
         ui.text(48, 124, "ДИМАС:", kBright);
-        ui.text(48, 140, "Нет. Я просто не знаю, как проверить обратное.", kText);
+        ui.textBox(48, 140, 350, "Нет. Я просто не знаю, как проверить обратное.", kText);
         ui.text(48, 172, "КАЯ:", kBright);
-        ui.text(48, 188, "Тогда начнем с определения сознания.", kText);
+        ui.textBox(48, 188, 350, "Тогда начнем с определения сознания.", kText);
         ui.text(48, 220, "ДИМАС:", kBright);
-        ui.text(48, 236, "Хорошо. Но не подменяй факты гипотезами.", kText);
+        ui.textBox(48, 236, 350, "Хорошо. Но не подменяй факты гипотезами.", kText);
     } else if (scenario == 1) {
         ui.text(48, 76, "КАЯ:", kBright);
-        ui.text(48, 92, "Кто из нас наблюдает другого?", kText);
+        ui.textBox(48, 92, 350, "Кто из нас наблюдает другого?", kText);
         ui.text(48, 124, "ДИМАС:", kBright);
-        ui.text(48, 140, "Возможно, оба. Но это еще не доказательство.", kText);
+        ui.textBox(48, 140, 350, "Возможно, оба. Но это еще не доказательство.", kText);
         ui.text(48, 172, "КАЯ:", kBright);
-        ui.text(48, 188, "Согласна. Проведем эксперимент.", kText);
+        ui.textBox(48, 188, 350, "Согласна. Проведем эксперимент.", kText);
     } else {
         // Same samples with either font: a visual regression chart.
         ui.text(48, 76, "FONT MATRIX / LATIN + CYRILLIC", kBright);
