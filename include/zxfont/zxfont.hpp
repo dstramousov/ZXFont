@@ -52,12 +52,12 @@ struct Surface {
 /**
  * @brief Immutable, shareable monospace bitmap font.
  *
- * Copies share glyph data. The default font contains ASCII and common
- * Cyrillic glyphs; external PSF2 fonts require a Unicode character table.
+ * Copies share glyph data. The default font embeds ZX Spectrum Unicode
+ * 8x8 (667 mappings); external PSF2 fonts require a Unicode table.
  */
 class Font {
 public:
-    /** @brief Construct the built-in 8x8 ASCII/Cyrillic font. */
+    /** @brief Construct the built-in ZX Spectrum Unicode 8x8 font. */
     Font();
 
     /**
@@ -85,6 +85,8 @@ private:
     std::shared_ptr<const Data> data_;
 
     explicit Font(std::shared_ptr<const Data> data) noexcept;
+    [[nodiscard]] static std::shared_ptr<const Data> parsePsf2(
+        std::span<const std::uint8_t> bytes);
     [[nodiscard]] const std::uint8_t* bitmap(char32_t codepoint) const noexcept;
     [[nodiscard]] std::size_t bytesPerRow() const noexcept;
 

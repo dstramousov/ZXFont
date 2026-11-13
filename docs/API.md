@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.7)
+# ZXFont Core API (v0.0.8)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -16,9 +16,10 @@ Include `<zxfont/zxfont.hpp>` and link `ZXFont::zxfont`.
 
 ## Fonts
 
-The default `zx::Font{}` uses 8x8 bitmap glyphs for printable ASCII,
-Russian Cyrillic, and selected Ukrainian/Belarusian letters. It is bundled
-in the library; no external font files are required for these glyphs.
+The default `zx::Font{}` embeds **ZX Spectrum Unicode 8x8**, including
+Latin, Russian/Ukrainian Cyrillic and box-drawing glyphs (667 Unicode
+mappings). Applications need **no external font file** for the default.
+The old mixed ASCII/Cyrillic bitmaps are no longer bundled.
 
 ```cpp
 zx::Font console = zx::Font::loadPsf2("my_console_font.psf");
@@ -33,26 +34,48 @@ ui.text(8, 40, "Кая", {255, 200, 100, 255});
 - Glyph dimensions are 1..256 pixels per axis; font files are limited to 16 MiB.
 - Fonts are immutable, and copies share ownership of the underlying bitmaps.
 - `Context::setFont(font)` affects subsequent text commands only. Previously
-  queued text keeps the font it was originally submitted with.
+  queued text keeps the font it was originally submitted with. This already
+  permits **different glyph dimensions within one frame** with no new API.
+  Newline advances by the height of the font captured for each command.
 - When a glyph is missing from the selected font, `text()` throws instead of
   drawing an arbitrary substitute. Call `font.hasGlyph()` to query coverage.
 - Glyphs are monospace, top-to-bottom. All characters in a font use the same
   advance width/height. Neither kerning nor TTF/OTF shaping is supported.
 
-## ZX Spectrum Unicode 8x8 font (v0.0.7)
+## ZX Spectrum Unicode 8x8 font (v0.0.8)
 
-The optional `fonts/zx-spectrum-unicode-8x8.psf` data file provides 667
-Unicode mappings from the ZX Spectrum Unicode source outlines. Load with the
-existing `Font::loadPsf2()` method. It is intentionally **not** the default
-`Font{}` yet, allowing visual A/B comparison and preserving legacy rendering.
-The file is copied to `build/fonts/` when demos/tests are built; it is not
-embedded in the static library. See `fonts/SOURCE.md` for provenance.
+The default font is the ZX Spectrum Unicode 8x8 design. It is compiled into
+`libzxfont.a` using `src/spectrum_unicode_8x8.hpp`, generated from
+`fonts/zx-spectrum-unicode-8x8.psf`. It has the **same pixels and mappings**
+as that PSF2 file, which remains a reference asset. For consistent font
+coverage, always supply a Unicode-mapped PSF2 font when loading additional
+font families. No TTF rasterizer is needed at runtime.
+
+### Several fonts in one UI
+
+```cpp
+zx::Font compact; // Built-in Spectrum Unicode 8x8.
+zx::Font other = zx::Font::loadPsf2("font_with_other_dimensions.psf");
+ui.setFont(compact);
+ui.text(8, 8, "STATUS", zx::ColorIndex{15});
+ui.setFont(other);
+ui.text(8, 32, "Текст другим шрифтом", zx::ColorIndex{12});
+ui.setFont(compact);
+ui.text(8, 64, "> ", zx::ColorIndex{15});
+```
+
+Each call captures its font; changing the selected font does not restyle
+already queued commands. Pixel coordinates stay absolute; automatic text
+layout/wrapping and per-glyph fallbacks are not part of this milestone.
+The two SDL3 demos use F3 to switch between default embedded data and its
+identical PSF2 source, so their letterforms **should not visibly change**.
+The first genuinely different compact/readability font will be chosen later.
 
 Display scaling is the host's responsibility. In the SDL3 demos the logical
 frame is fitted using integer physical pixels per logical pixel when possible;
 fractional scaling is used only when output is smaller than the framebuffer.
 
-## Palette-indexed colors (v0.0.7)
+## Palette-indexed colors
 
 RGBA colors are still accepted and stay exactly as supplied. Indexed colors
 reference one of 16 entries from the current palette:
@@ -97,12 +120,12 @@ For Mode256, the host still owns its framebuffer and presents the frame.
 Direct writes to an indexed 8-bit framebuffer are not supported yet. The
 indexed adapter will be designed against Mode256's actual buffer contract.
 
-## SDL3 visual integration examples (v0.0.7)
+## SDL3 visual integration examples (v0.0.8)
 
 `zxfont_kaya` uses ZXFont for its entire mock terminal. `zxfont_mode256`
 composes ZXFont text on top of a separately rendered 256x192 game framebuffer.
 Both programs own and present their RGBA8 buffers using SDL3, which is **not**
 part of the `ZXFont::zxfont` interface. See `examples/` and `README.md`.
-F2 cycles the four palettes; F3 switches between ZX Spectrum Unicode and
-the previous mixed 8x8 font; F5 includes dedicated glyph diagnostic scenes.
+F2 cycles the four palettes; F3 compares embedded ZX Spectrum Unicode
+against the equivalent external PSF2 asset; F5 shows glyph diagnostic scenes.
 The SDL3 adapter preserves aspect ratio when resized or fullscreen.

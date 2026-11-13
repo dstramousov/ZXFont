@@ -43,13 +43,13 @@ void testCanvasAndText() {
     ui.text(0, 0, "A\nB", {10, 20, 30, 255});
     ui.render({pixels, 16, 16, stride});
 
-    // 'A': first row 0x0C, so x=2 and x=3 are lit.
-    require(pixels[offset(2, 0, stride) + 0] == 10);
-    require(pixels[offset(2, 0, stride) + 1] == 20);
-    require(pixels[offset(2, 0, stride) + 2] == 30);
-    require(pixels[offset(2, 0, stride) + 3] == 255);
+    // Spectrum A has top ink in row 1, columns 2..5.
+    require(pixels[offset(2, 1, stride) + 0] == 10);
+    require(pixels[offset(2, 1, stride) + 1] == 20);
+    require(pixels[offset(2, 1, stride) + 2] == 30);
+    require(pixels[offset(2, 1, stride) + 3] == 255);
     require(pixels[offset(0, 0, stride)] == 0);
-    require(pixels[offset(2, 8, stride) + 3] == 255); // 'B' on next line.
+    require(pixels[offset(2, 9, stride) + 3] == 255); // 'B' on next line.
     require(pixels[16 * 4] == 0); // Row padding is preserved.
 
     ui.clear();
@@ -70,7 +70,7 @@ void testClippingAndBlending() {
     ui.text(-2, 0, "A", {100, 0, 0, 128});
     ui.text(999, 999, "Z");
     ui.render({pixels, 8, 8, 8 * 4});
-    const auto index = offset(0, 0, 8 * 4);
+    const auto index = offset(0, 1, 8 * 4);
     require(pixels[index + 0] == 50);
     require(pixels[index + 1] == 0);
     require(pixels[index + 2] == 50);
@@ -88,7 +88,7 @@ void testClippingAndBlending() {
     pixels.fill(0);
     ui.text(0, 0, "A", {120, 70, 30, 128});
     ui.render({pixels, 8, 8, 8 * 4});
-    const auto glyph_pixel = offset(2, 0, 8 * 4);
+    const auto glyph_pixel = offset(2, 1, 8 * 4);
     require(pixels[glyph_pixel + 0] == 120);
     require(pixels[glyph_pixel + 1] == 70);
     require(pixels[glyph_pixel + 2] == 30);
@@ -181,15 +181,15 @@ void testPalettes() {
         ui.setPalette(palette);
         ui.render({pixels, 24, 8, 24 * 4});
         const auto expected = zx::paletteColor(palette, {10});
-        const auto first = offset(2, 0, 24 * 4);
-        const auto second = offset(10, 0, 24 * 4);
+        const auto first = offset(2, 1, 24 * 4);
+        const auto second = offset(10, 1, 24 * 4);
         require(pixels[first] == expected.r);
         require(pixels[first + 1] == expected.g);
         require(pixels[first + 2] == expected.b);
         require(pixels[second] == 13);
         require(pixels[second + 1] == 14);
         require(pixels[second + 2] == 15);
-        require(pixels[offset(18, 0, 24 * 4) + 3] == 0);
+        require(pixels[offset(18, 1, 24 * 4) + 3] == 0);
     };
     check(zx::Palette::MonoGreen);
     check(zx::Palette::MonoAmber);
@@ -203,21 +203,21 @@ void appendLe32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
     }
 }
 
-std::vector<std::uint8_t> makePsf2() {
+std::vector<std::uint8_t> makePsf2(std::uint32_t glyph_height = 8) {
     std::vector<std::uint8_t> bytes;
     appendLe32(bytes, 0x864AB572);  // magic
     appendLe32(bytes, 0);           // version
     appendLe32(bytes, 32);          // header size
     appendLe32(bytes, 1);           // Unicode table flag
     appendLe32(bytes, 2);           // glyph count
-    appendLe32(bytes, 16);          // bytes per glyph: 9x8, 2 bytes/row
-    appendLe32(bytes, 8);           // height
+    appendLe32(bytes, glyph_height * 2);  // 9 pixels wide, 2 bytes/row
+    appendLe32(bytes, glyph_height);      // height
     appendLe32(bytes, 9);           // width
-    for (int i = 0; i < 8; ++i) {
+    for (std::uint32_t i = 0; i < glyph_height; ++i) {
         bytes.push_back(0x80); // leftmost pixel
         bytes.push_back(0x80); // ninth pixel
     }
-    for (int i = 0; i < 8; ++i) {
+    for (std::uint32_t i = 0; i < glyph_height; ++i) {
         bytes.push_back(0x40);
         bytes.push_back(0x00);
     }
@@ -256,11 +256,29 @@ void testExternalPsf2() {
     require(throws<std::invalid_argument>([&] { ui.text(0, 0, "Z"); }));
     std::vector<std::uint8_t> pixels(27 * 16 * 4);
     ui.render({pixels, 27, 16, 27 * 4});
-    require(pixels[offset(2, 0, 27 * 4)] == 255);  // built-in A unchanged
+    require(pixels[offset(2, 1, 27 * 4)] == 255);  // built-in A unchanged
     require(pixels[offset(9, 0, 27 * 4) + 1] == 255);  // PSF2 glyph, col 0
     require(pixels[offset(17, 0, 27 * 4) + 1] == 255); // PSF2 glyph, col 8
     require(pixels[offset(19, 0, 27 * 4) + 1] == 255); // Cyrillic glyph, col 1
     require(pixels[offset(1, 8, 27 * 4) + 3] == 255);
+
+    // Exercise two different glyph heights and widths within the same frame.
+    // A queued command captures its selected font even after another switch.
+    writeFont(makePsf2(12));
+    const auto tall_font = zx::Font::loadPsf2(path);
+    require(tall_font.glyphWidth() == 9 && tall_font.glyphHeight() == 12);
+    zx::Context mixed(32, 24);
+    mixed.text(0, 0, "A");
+    mixed.setFont(tall_font);
+    mixed.text(8, 0, "A\nA");
+    mixed.setFont(zx::Font{});
+    mixed.text(18, 0, "А");
+    std::array<std::uint8_t, 32 * 24 * 4> combined{};
+    mixed.render({combined, 32, 24, 32 * 4});
+    require(combined[offset(2, 1, 32 * 4) + 3] == 255);
+    require(combined[offset(8, 0, 32 * 4) + 3] == 255);
+    require(combined[offset(8, 12, 32 * 4) + 3] == 255);
+    require(combined[offset(20, 1, 32 * 4) + 3] == 255);
 
     auto invalid = valid;
     invalid[12] = 0;  // no Unicode table flag
@@ -281,8 +299,9 @@ void testExternalPsf2() {
 }
 
 void testSpectrumUnicodeFont() {
-    const zx::Font legacy;
+    const zx::Font builtin;
     const zx::Font spectrum = zx::Font::loadPsf2(ZXFONT_TEST_FONT_PATH);
+    require(builtin.glyphWidth() == 8 && builtin.glyphHeight() == 8);
     require(spectrum.glyphWidth() == 8 && spectrum.glyphHeight() == 8);
     require(spectrum.hasGlyph(U' '));
     require(!spectrum.hasGlyph(U'🎯'));
@@ -292,7 +311,7 @@ void testSpectrumUnicodeFont() {
                           U"абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
                           U"ҐґЄєІіЇї┌┐└┘─│█░▒▓←↑→↓") {
         if (cp != 0) {
-            require(spectrum.hasGlyph(cp));
+            require(spectrum.hasGlyph(cp) && builtin.hasGlyph(cp));
         }
     }
     // Sample the exact PSF2 glyph rows. These values exercise the shape of
@@ -319,17 +338,33 @@ void testSpectrumUnicodeFont() {
         0x24, 0x00, 0x7E, 0x40, 0x7C, 0x40, 0x7E, 0x00}));
     require(rowsFor("█") == (std::array<std::uint8_t, 8>{
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}));
-    require(!legacy.hasGlyph(U'█'));
+    require(builtin.hasGlyph(U'█'));
 
-    // Font switching does not retroactively rewrite queued glyphs.
-    zx::Context ui(16, 8);
+    // Built-in and file-loaded fonts must be pixel-identical for the same text.
+    const std::string phrase = "АБВГДЁЖЩ Її Ґґ ┌─┐█ 012345 ABCdef";
+    zx::Context compared(384, 16);
+    compared.text(0, 0, phrase);
+    std::vector<std::uint8_t> embedded_pixels(384 * 16 * 4);
+    compared.render({embedded_pixels, 384, 16, 384 * 4});
+    compared.clear();
+    compared.setFont(spectrum);
+    compared.text(0, 0, phrase);
+    std::vector<std::uint8_t> external_pixels(384 * 16 * 4);
+    compared.render({external_pixels, 384, 16, 384 * 4});
+    require(embedded_pixels == external_pixels);
+
+    // Multiple Font objects remain attached to their own drawing commands.
+    zx::Context ui(24, 16);
     ui.text(0, 0, "A");
     ui.setFont(spectrum);
     ui.text(8, 0, "А");
-    std::array<std::uint8_t, 16 * 8 * 4> pixels{};
-    ui.render({pixels, 16, 8, 16 * 4});
-    require(pixels[offset(2, 0, 16 * 4) + 3] == 255);
-    require(pixels[offset(10, 1, 16 * 4) + 3] == 255);
+    ui.setFont(builtin);
+    ui.text(16, 0, "Ё");
+    std::array<std::uint8_t, 24 * 16 * 4> pixels{};
+    ui.render({pixels, 24, 16, 24 * 4});
+    require(pixels[offset(2, 1, 24 * 4) + 3] == 255);
+    require(pixels[offset(10, 1, 24 * 4) + 3] == 255);
+    require(pixels[offset(18, 0, 24 * 4) + 3] == 255);
 }
 
 }  // namespace

@@ -1,13 +1,10 @@
 #include "zxfont/zxfont.hpp"
 
-#include "basic_ascii_8x8.hpp"
-#include "basic_cyrillic_8x8.hpp"
+#include "spectrum_unicode_8x8.hpp"
 #include "utf8.hpp"
 
 #include <algorithm>
-#include <array>
 #include <fstream>
-#include <iterator>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -21,13 +18,7 @@ constexpr std::uint32_t kUnicodeTableFlag = 1;
 constexpr std::uint32_t kMaxDimension = 256;
 constexpr std::size_t kMaxFontBytes = 16 * 1024 * 1024;
 
-std::uint8_t reverseBits(std::uint8_t bits) noexcept {
-    bits = static_cast<std::uint8_t>(((bits & 0x55u) << 1) | ((bits & 0xAAu) >> 1));
-    bits = static_cast<std::uint8_t>(((bits & 0x33u) << 2) | ((bits & 0xCCu) >> 2));
-    return static_cast<std::uint8_t>((bits << 4) | (bits >> 4));
-}
-
-std::uint32_t readLe32(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
+std::uint32_t readLe32(std::span<const std::uint8_t> bytes, std::size_t offset) {
     if (offset > bytes.size() || bytes.size() - offset < 4) {
         throw std::invalid_argument("Truncated PSF2 header");
     }
@@ -48,29 +39,10 @@ struct Font::Data {
     std::unordered_map<char32_t, std::size_t> indices;
 };
 
-// Define builtin construction through Font's own methods to keep Data private.
+// The default Spectrum Unicode font is embedded and uses the same validated
+// parser as external PSF2 files, with no runtime asset dependency.
 Font::Font() {
-    static const auto builtin = [] {
-        auto data = std::make_shared<Data>();
-        constexpr std::size_t ascii_count = std::size(detail::kBasicAscii8x8);
-        constexpr std::size_t cyrillic_count = std::size(detail::kBasicCyrillic8x8);
-        data->glyphs.reserve((ascii_count + cyrillic_count) * 8);
-        data->indices.reserve(ascii_count + cyrillic_count);
-        for (std::size_t i = 0; i < ascii_count; ++i) {
-            data->indices.emplace(static_cast<char32_t>(i + 0x20), i);
-            for (auto row : detail::kBasicAscii8x8[i]) {
-                data->glyphs.push_back(reverseBits(row));
-            }
-        }
-        for (std::size_t i = 0; i < cyrillic_count; ++i) {
-            const auto& glyph = detail::kBasicCyrillic8x8[i];
-            data->indices.emplace(glyph.codepoint, ascii_count + i);
-            for (auto row : glyph.rows) {
-                data->glyphs.push_back(reverseBits(row));
-            }
-        }
-        return std::shared_ptr<const Data>(std::move(data));
-    }();
+    static const auto builtin = parsePsf2(detail::kSpectrumUnicode8x8Psf2);
     data_ = builtin;
 }
 
@@ -156,6 +128,12 @@ Font Font::loadPsf2(const std::filesystem::path& path) {
                                   static_cast<std::streamsize>(size))) {
         throw std::runtime_error("Cannot read PSF2 font");
     }
+    return Font(parsePsf2(bytes));
+}
+
+std::shared_ptr<const Font::Data> Font::parsePsf2(
+    std::span<const std::uint8_t> bytes) {
+    const auto size = bytes.size();
     if (size < kPsf2HeaderBytes || readLe32(bytes, 0) != kPsf2Magic ||
         readLe32(bytes, 4) != 0) {
         throw std::invalid_argument("Unsupported PSF2 header");
@@ -226,7 +204,7 @@ Font Font::loadPsf2(const std::filesystem::path& path) {
     if (pos != size || data->indices.empty()) {
         throw std::invalid_argument("Invalid PSF2 Unicode table extent");
     }
-    return Font(std::move(data));
+    return data;
 }
 
 }  // namespace zx

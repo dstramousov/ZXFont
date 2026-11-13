@@ -28,3 +28,14 @@ Expected SHA256 of the resulting PSF2:
 
 **PSF2 is runtime data, not a TTF dependency.** All demo font loading uses
 `zx::Font::loadPsf2()`; the ZXFont core API and library remain unchanged.
+
+The default `zx::Font{}` uses the embedded representation of this PSF2
+asset, rather than the old mixed bitmap font. To regenerate its checked-in
+C++ source from the exact PSF2 file (Python 3.12+, build-time only):
+
+```bash
+python3 tools/embed_psf2.py fonts/zx-spectrum-unicode-8x8.psf src/spectrum_unicode_8x8.hpp
+```
+
+The embedded bytes and external file share the same PSF2 parser, so coverage
+and rasterized glyphs must match exactly. Both are tested in `zxfont_tests`.

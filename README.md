@@ -4,8 +4,8 @@ ZXFont is a C++20 bitmap-text library intended for retro games, terminals and
 character interfaces. Its core is independent of graphics/window libraries;
 SDL3 is used only by two optional visual test applications.
 
-**Current version: v0.0.7.** This milestone provides a compact `zx::Context`
-API, embedded 8x8 ASCII/Cyrillic glyphs, strict UTF-8 decoding, PSF2 Unicode
+**Current version: v0.0.8.** This milestone provides a compact `zx::Context`
+API, embedded ZX Spectrum Unicode 8x8 glyphs, strict UTF-8 decoding, PSF2 Unicode
 font loading, RGBA8 framebuffer rendering and four switchable 16-color
 palettes. GUI widgets are not implemented yet; SDL3 display glue remains demo-only.
 
@@ -38,7 +38,7 @@ render ASCII frames with ZXFont until actual box primitives are added.
 | `Esc` | Exit | Exit |
 | `F1` | Toggle help | Toggle help |
 | `F2` | Switch color palette | Switch overlay color palette |
-| `F3` | Switch ZX Unicode / legacy 8x8 font | Switch ZX Unicode / legacy 8x8 font |
+| `F3` | Compare embedded / PSF2 font source | Compare embedded / PSF2 font source |
 | `F5` | Change conversation / view font matrix | Change dialogue / view font matrix |
 | `F11` | Toggle fullscreen | Toggle fullscreen |
 | `Space` | — | Show/hide dialogue |
@@ -56,10 +56,11 @@ cmake --build build
 
 To forbid downloading SDL3 when it isn't installed, use
 `-DZXFONT_FETCH_SDL3=OFF`. SDL3 is never linked into the core library.
-F2 cycles Green, Amber, ZX, VGA; F3 switches between the matching
-ZX Spectrum Unicode 8x8 font and the previous mixed ASCII/Cyrillic font.
-F5 includes typography diagnostics in both applications. The new font is
-copied to `build/fonts/` automatically when demos or tests are configured.
+F2 cycles Green, Amber, ZX, VGA. F3 switches between the **embedded default**
+Spectrum Unicode 8x8 and the identical Unicode PSF2 loaded from disk. This
+is a source/loader equivalence check, not a different-looking font. F5 shows
+typography diagnostics in both applications. The PSF2 is copied to
+`build/fonts/` when demos or tests are configured.
 Pixel-perfect output uses whole-number scaling whenever the canvas fits the
 window; smaller windows use a fractional fallback to avoid cropping.
 
@@ -102,11 +103,14 @@ ui.setFont(font);
 ui.text(8, 40, "Кая");
 ```
 
-`fonts/zx-spectrum-unicode-8x8.psf` is an included, optional PSF2 font
-with 667 glyphs (see [font provenance](fonts/SOURCE.md)); the default
-`zx::Font{}` remains the legacy font for backward compatibility. Both visual
-demos select the new font on startup and switch to the legacy font with F3.
-PSF2 fonts must have Unicode mappings and include all requested glyphs. See
+`zx::Font{}` now embeds the **ZX Spectrum Unicode 8x8** font with 667
+Unicode-mapped glyphs. It works without external files. The identical PSF2
+file `fonts/zx-spectrum-unicode-8x8.psf` remains available for loading and
+comparison (see [font provenance](fonts/SOURCE.md)). The older mixed
+ASCII/Cyrillic font has been removed. PSF2 fonts must have Unicode mappings
+and include all requested glyphs. Different fonts can be mixed **within the
+same frame** by calling `setFont()` between `text()` commands; commands keep
+their selected font and glyph dimensions. No extra API is needed. See
 [docs/API.md](docs/API.md) for validation, text and glyph behavior, and
 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) for bitmap attribution.
 

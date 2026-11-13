@@ -21,8 +21,8 @@ inline zx::Font loadSpectrumFont() {
                               "zx-spectrum-unicode-8x8.psf");
 }
 
-inline const char* fontName(bool spectrum) noexcept {
-    return spectrum ? "SPECTRUM UNICODE 8X8" : "LEGACY MIXED 8X8";
+inline const char* fontName(bool external) noexcept {
+    return external ? "ZX UNICODE / PSF2" : "ZX UNICODE / BUILTIN";
 }
 
 }  // namespace demo

@@ -17,13 +17,13 @@ constexpr zx::ColorIndex kDim{7};
 constexpr zx::ColorIndex kBright{15};
 
 void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible,
-                  zx::Palette palette, bool spectrum) {
+                  zx::Palette palette, bool external) {
     demo::box(ui, 2, 2, 76, 46, kDim);
     demo::rule(ui, 2, 6, 76, kDim);
     demo::rule(ui, 2, 42, 76, kDim);
 
     ui.text(32, 28, "ZXFONT / KAYA TERMINAL", kBright);
-    ui.text(360, 28, demo::fontName(spectrum), kBright);
+    ui.text(360, 28, demo::fontName(external), kBright);
     ui.text(32, 44, "SESSION 001                        STATUS: ONLINE", kDim);
     ui.text(536, 44, demo::paletteName(palette), kBright);
 
@@ -32,7 +32,7 @@ void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible,
         ui.text(48, 112, "ESC  - EXIT", kText);
         ui.text(48, 136, "F1   - TOGGLE HELP", kText);
         ui.text(48, 160, "F2   - CHANGE PALETTE", kText);
-        ui.text(48, 172, "F3   - CHANGE FONT", kText);
+        ui.text(48, 172, "F3   - SWITCH FONT SOURCE", kText);
         ui.text(48, 184, "F5   - CHANGE DIALOGUE", kText);
         ui.text(48, 208, "F11  - TOGGLE FULLSCREEN", kText);
         ui.text(48, 240, "The text and frames are rendered by ZXFont.", kDim);
@@ -64,21 +64,17 @@ void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible,
         ui.text(48, 192, "Сегодня проверяем форму букв и ритм строки.", kText);
         ui.text(48, 204, "Українською: Ґанок, Єнот, Їжак, Ірій.", kText);
         ui.text(48, 228, "0123456789  !?.,:; +-*/()[]{}", kText);
-        if (spectrum) {
-            ui.text(48, 252, "┌──────────┬──────────┐", kText);
-            ui.text(48, 264, "│ █ ░ ▒ ▓│ ← ↑ → ↓  │", kText);
-            ui.text(48, 276, "└──────────┴──────────┘", kText);
-        } else {
-            ui.text(48, 252, "[No box-drawing glyphs in legacy font]", kDim);
-        }
-        ui.text(48, 316, "F3 changes ONLY the font; F2 changes colors.", kDim);
+        ui.text(48, 252, "┌──────────┬──────────┐", kText);
+        ui.text(48, 264, "│ █ ░ ▒ ▓│ ← ↑ → ↓  │", kText);
+        ui.text(48, 276, "└──────────┴──────────┘", kText);
+        ui.text(48, 316, "F3: BUILTIN / PSF2 (IDENTICAL GLYPHS)", kDim);
     }
 
     ui.text(40, 352, ">", kBright);
     if (cursor_visible) {
         ui.text(56, 352, "_", kText);
     }
-    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 FONT | F5 SCENE | F11 FULL", kDim);
+    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 SOURCE | F5 SCENE | F11 FULL", kDim);
 }
 
 }  // namespace
@@ -89,10 +85,10 @@ int main() {
         demo::SdlDisplay display("ZXFont / Kaya Terminal", kWidth, kHeight, 2, true);
         demo::Frame frame(kWidth, kHeight);
         zx::Context ui(kWidth, kHeight);
-        const zx::Font legacy_font;
-        const zx::Font spectrum_font = demo::loadSpectrumFont();
-        bool use_spectrum = true;
-        ui.setFont(spectrum_font);
+        const zx::Font builtin_font;
+        const zx::Font external_font = demo::loadSpectrumFont();
+        bool use_external = false;
+        ui.setFont(builtin_font);
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
         bool running = true;
@@ -113,8 +109,8 @@ int main() {
                             ui.setPalette(palette);
                             break;
                         case SDLK_F3:
-                            use_spectrum = !use_spectrum;
-                            ui.setFont(use_spectrum ? spectrum_font : legacy_font);
+                            use_external = !use_external;
+                            ui.setFont(use_external ? external_font : builtin_font);
                             break;
                         case SDLK_F5: scenario = (scenario + 1) % 3; break;
                         case SDLK_F11: display.toggleFullscreen(); break;
@@ -129,7 +125,7 @@ int main() {
             frame.rect(24, 56, 592, 8, zx::paletteColor(palette, {1}));
             ui.clear();
             drawTerminal(ui, help, scenario, (SDL_GetTicks() / 500) % 2 == 0,
-                         palette, use_spectrum);
+                         palette, use_external);
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

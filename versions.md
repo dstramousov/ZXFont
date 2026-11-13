@@ -48,3 +48,12 @@
 - Add F5 typography diagnostic screens to Kaya Terminal and Mode256 Simulator.
 - Prefer integer pixel scaling in windowed and fullscreen output, falling back to fractional downscaling only for undersized windows.
 - Document upstream font provenance and a reproducible offline SFD-to-PSF2 converter; test glyph shapes and pixel-perfect viewports.
+
+## v0.0.7 -> v0.0.8
+
+- Remove the previous mixed IBM PC / Go Mono 8x8 built-in font and its obsolete license text.
+- Embed ZX Spectrum Unicode 8x8 as the sole default font, with no external runtime file needed.
+- Use one validated PSF2 decoder for embedded glyphs and external fonts; add reproducible embedding tool.
+- Keep the minimal `Context::setFont()` / `text()` API and test independent font snapshots, dimensions and built-in/PSF2 pixel equivalence.
+- Repurpose F3 in both SDL3 demos to compare identical embedded/PSF2 font sources; retain F5 typography diagnostics.
+- Update documentation and asset provenance without adding font families prematurely.
