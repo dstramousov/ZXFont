@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.4)
+# ZXFont Core API (v0.0.5; unchanged from v0.0.4)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -59,3 +59,11 @@ ui.text(8, 40, "Кая", {255, 200, 100, 255});
 For Mode256, the host still owns its framebuffer and presents the frame.
 Direct writes to an indexed 8-bit framebuffer are not supported yet. The
 indexed adapter will be designed against Mode256's actual buffer contract.
+
+## SDL3 visual integration examples (v0.0.5)
+
+`zxfont_kaya` uses ZXFont for its entire mock terminal. `zxfont_mode256`
+composes ZXFont text on top of a separately rendered 256x192 game framebuffer.
+Both programs own and present their RGBA8 buffers using SDL3, which is **not**
+part of the `ZXFont::zxfont` interface. See `examples/` and `README.md`.
+The library API is unchanged from v0.0.4.

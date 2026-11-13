@@ -2,24 +2,59 @@
 
 ZXFont is a C++20 bitmap-text library intended for retro games, terminals and
 character interfaces. Its core is independent of graphics/window libraries;
-SDL3 is a planned optional backend.
+SDL3 is used only by two optional visual test applications.
 
-**Current version: v0.0.4.** This milestone provides a compact `zx::Context`
+**Current version: v0.0.5.** This milestone provides a compact `zx::Context`
 API, embedded 8x8 ASCII/Cyrillic glyphs, strict UTF-8 decoding, PSF2 Unicode
-font loading and RGBA8 framebuffer rendering. GUI widgets, palettes and SDL3
-rendering have not yet been implemented.
+font loading and RGBA8 framebuffer rendering. GUI widgets and palette
+switching are not implemented yet; SDL3 display glue remains demo-only.
 
 ## Build and test
 
-Requirements: CMake >= 3.21, Ninja, a C++20 compiler.
+Requirements: CMake >= 3.21, Ninja, a C++20 compiler. The visual demos use
+SDL3 >= 3.2. When SDL3 is not installed, the top-level CMake build downloads
+a pinned SDL3 release (requires Git and network access on first configure).
+The core library itself does not depend on SDL3.
 
 ```bash
 ./m                    # Configure and build Debug
 ./m test               # Run CTest tests
 ./build/zxfont_basic   # Write zxfont_demo.ppm to the current directory
+./build/zxfont_kaya    # Full-screen mock terminal (F11 for windowed mode)
+./build/zxfont_mode256 # Windowed game-host integration simulator
 ```
 
 Other modes: `./m release`, `./m profile`, `./m rebuild`, `./m clean`.
+
+### Visual test applications
+
+Both demos are built by `./m` and linked against the same `ZXFont::zxfont`
+static library. Each SDL3 application owns its window, events, and pixel
+buffer. **ZXFont only draws text into the supplied RGBA8 buffer.** The demos
+render ASCII frames with ZXFont until actual box primitives are added.
+
+| Key | Kaya Terminal | Mode256 Simulator |
+| --- | --- | --- |
+| `Esc` | Exit | Exit |
+| `F1` | Toggle help | Toggle help |
+| `F5` | Change mock conversation | Change mock dialogue |
+| `F11` | Toggle fullscreen | Toggle fullscreen |
+| `Space` | — | Show/hide dialogue |
+| `Left/Right` | — | Move game character |
+
+The interactive SDL3 demos are enabled only when ZXFont is built as a
+standalone project (or `ZXFONT_BUILD_DEMOS=ON` is specified explicitly).
+When ZXFont is embedded via `add_subdirectory()`, no SDL3 is required.
+To build the core and tests without SDL3, configure:
+
+```bash
+cmake -S . -B build -G Ninja -DZXFONT_BUILD_DEMOS=OFF
+cmake --build build
+```
+
+To forbid downloading SDL3 when it isn't installed, use
+`-DZXFONT_FETCH_SDL3=OFF`. SDL3 is never linked into the core library.
+`F2`/`F3` are reserved for future palette/font switching, not implemented yet.
 
 ## Integrating in another CMake project
 

@@ -25,3 +25,10 @@
 - Add external PSF2 Unicode font loading and per-command font snapshots via Context::setFont.
 - Extend tests for Cyrillic, font switching, non-8-bit widths, malformed UTF-8 and invalid font files.
 - Update the headless demonstration, API documentation and font provenance.
+
+## v0.0.4 -> v0.0.5
+
+- Add a full-screen SDL3 Kaya Terminal visual test with mock Cyrillic conversations.
+- Add a windowed Mode256-style host that draws its own pixel world and overlays ZXFont text.
+- Keep SDL3 outside the ZXFont core; provide automatic pinned SDL3 retrieval for standalone builds.
+- Document visual demo controls, build options, and the framebuffer ownership boundary.
