@@ -280,6 +280,58 @@ void testExternalPsf2() {
     require(throws<std::invalid_argument>([&] { (void)zx::Font::loadPsf2(path); }));
 }
 
+void testSpectrumUnicodeFont() {
+    const zx::Font legacy;
+    const zx::Font spectrum = zx::Font::loadPsf2(ZXFONT_TEST_FONT_PATH);
+    require(spectrum.glyphWidth() == 8 && spectrum.glyphHeight() == 8);
+    require(spectrum.hasGlyph(U' '));
+    require(!spectrum.hasGlyph(U'🎯'));
+    for (const auto cp : U"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                          U"abcdefghijklmnopqrstuvwxyz"
+                          U"АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+                          U"абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+                          U"ҐґЄєІіЇї┌┐└┘─│█░▒▓←↑→↓") {
+        if (cp != 0) {
+            require(spectrum.hasGlyph(cp));
+        }
+    }
+    // Sample the exact PSF2 glyph rows. These values exercise the shape of
+    // Cyrillic letters, not merely their presence in the Unicode map.
+    auto rowsFor = [&](const char* text) {
+        zx::Context ui(8, 8);
+        ui.setFont(spectrum);
+        ui.text(0, 0, text, zx::Color{255, 255, 255, 255});
+        std::array<std::uint8_t, 8 * 8 * 4> pixels{};
+        ui.render({pixels, 8, 8, 8 * 4});
+        std::array<std::uint8_t, 8> rows{};
+        for (std::size_t y = 0; y < 8; ++y) {
+            for (std::size_t x = 0; x < 8; ++x) {
+                if (pixels[offset(x, y, 8 * 4) + 3] != 0) {
+                    rows[y] |= static_cast<std::uint8_t>(1u << (7 - x));
+                }
+            }
+        }
+        return rows;
+    };
+    require(rowsFor("А") == (std::array<std::uint8_t, 8>{
+        0x00, 0x3C, 0x42, 0x42, 0x7E, 0x42, 0x42, 0x00}));
+    require(rowsFor("Ё") == (std::array<std::uint8_t, 8>{
+        0x24, 0x00, 0x7E, 0x40, 0x7C, 0x40, 0x7E, 0x00}));
+    require(rowsFor("█") == (std::array<std::uint8_t, 8>{
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}));
+    require(!legacy.hasGlyph(U'█'));
+
+    // Font switching does not retroactively rewrite queued glyphs.
+    zx::Context ui(16, 8);
+    ui.text(0, 0, "A");
+    ui.setFont(spectrum);
+    ui.text(8, 0, "А");
+    std::array<std::uint8_t, 16 * 8 * 4> pixels{};
+    ui.render({pixels, 16, 8, 16 * 4});
+    require(pixels[offset(2, 0, 16 * 4) + 3] == 255);
+    require(pixels[offset(10, 1, 16 * 4) + 3] == 255);
+}
+
 }  // namespace
 
 int main() {
@@ -289,4 +341,5 @@ int main() {
     testUnicodeAndSnapshot();
     testPalettes();
     testExternalPsf2();
+    testSpectrumUnicodeFont();
 }

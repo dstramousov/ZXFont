@@ -43,3 +43,12 @@ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
 CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
+
+## ZX Spectrum Unicode 8x8 (v0.0.7)
+
+`fonts/zx-spectrum-unicode-8x8.psf` is generated from the SFD outlines in
+[JFSebastian/zx-spectrum-unicode-font](https://github.com/jfsebastian/zx-spectrum-unicode-font).
+Jorge Ferrer's project is dedicated to the public domain under Unlicense.
+The upstream README states that this font is derived from Darko Stanicic's
+Spectrum TrueType font (described as "healthware"); see `fonts/SOURCE.md` for
+provenance and redistribution caveat. No upstream TTF or SFD is included.

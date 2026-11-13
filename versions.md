@@ -40,3 +40,11 @@
 - Enable F2 palette cycling in Kaya Terminal and Mode256 Simulator without changing fonts or game-world pixels.
 - Fit SDL3 output to the physical window/fullscreen size with a letterboxed viewport to prevent clipping.
 - Add palette, recoloring, and viewport regression tests; document the new API and controls.
+
+## v0.0.6 -> v0.0.7
+
+- Add a consistent ZX Spectrum Unicode 8x8 PSF2 font with 667 mappings, including Russian/Ukrainian letters and box drawing.
+- Preserve the legacy built-in font for A/B visual comparisons; F3 switches fonts in both SDL3 demos.
+- Add F5 typography diagnostic screens to Kaya Terminal and Mode256 Simulator.
+- Prefer integer pixel scaling in windowed and fullscreen output, falling back to fractional downscaling only for undersized windows.
+- Document upstream font provenance and a reproducible offline SFD-to-PSF2 converter; test glyph shapes and pixel-perfect viewports.

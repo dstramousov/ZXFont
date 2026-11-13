@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.6)
+# ZXFont Core API (v0.0.7)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -39,7 +39,20 @@ ui.text(8, 40, "Кая", {255, 200, 100, 255});
 - Glyphs are monospace, top-to-bottom. All characters in a font use the same
   advance width/height. Neither kerning nor TTF/OTF shaping is supported.
 
-## Palette-indexed colors (v0.0.6)
+## ZX Spectrum Unicode 8x8 font (v0.0.7)
+
+The optional `fonts/zx-spectrum-unicode-8x8.psf` data file provides 667
+Unicode mappings from the ZX Spectrum Unicode source outlines. Load with the
+existing `Font::loadPsf2()` method. It is intentionally **not** the default
+`Font{}` yet, allowing visual A/B comparison and preserving legacy rendering.
+The file is copied to `build/fonts/` when demos/tests are built; it is not
+embedded in the static library. See `fonts/SOURCE.md` for provenance.
+
+Display scaling is the host's responsibility. In the SDL3 demos the logical
+frame is fitted using integer physical pixels per logical pixel when possible;
+fractional scaling is used only when output is smaller than the framebuffer.
+
+## Palette-indexed colors (v0.0.7)
 
 RGBA colors are still accepted and stay exactly as supplied. Indexed colors
 reference one of 16 entries from the current palette:
@@ -84,11 +97,12 @@ For Mode256, the host still owns its framebuffer and presents the frame.
 Direct writes to an indexed 8-bit framebuffer are not supported yet. The
 indexed adapter will be designed against Mode256's actual buffer contract.
 
-## SDL3 visual integration examples (v0.0.6)
+## SDL3 visual integration examples (v0.0.7)
 
 `zxfont_kaya` uses ZXFont for its entire mock terminal. `zxfont_mode256`
 composes ZXFont text on top of a separately rendered 256x192 game framebuffer.
 Both programs own and present their RGBA8 buffers using SDL3, which is **not**
 part of the `ZXFont::zxfont` interface. See `examples/` and `README.md`.
-F2 cycles the four palettes; font switching is not part of this milestone.
+F2 cycles the four palettes; F3 switches between ZX Spectrum Unicode and
+the previous mixed 8x8 font; F5 includes dedicated glyph diagnostic scenes.
 The SDL3 adapter preserves aspect ratio when resized or fullscreen.

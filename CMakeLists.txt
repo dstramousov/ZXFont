@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ZXFont VERSION 0.0.6 LANGUAGES CXX)
+project(ZXFont VERSION 0.0.7 LANGUAGES CXX)
 
 add_library(zxfont STATIC src/zxfont.cpp src/font.cpp src/palette.cpp)
 add_library(ZXFont::zxfont ALIAS zxfont)
@@ -15,6 +15,16 @@ option(ZXFONT_BUILD_EXAMPLES "Build ZXFont headless examples" ${PROJECT_IS_TOP_L
 option(ZXFONT_BUILD_TESTS "Build ZXFont tests" ${PROJECT_IS_TOP_LEVEL})
 option(ZXFONT_BUILD_DEMOS "Build the interactive SDL3 visual test applications" ${PROJECT_IS_TOP_LEVEL})
 option(ZXFONT_FETCH_SDL3 "Download pinned SDL3 if no system installation is found" ${PROJECT_IS_TOP_LEVEL})
+
+# The Unicode font is a data asset used only by demos/tests. Consumers
+# linking ZXFont::zxfont are not required to copy or install it.
+if(ZXFONT_BUILD_DEMOS OR ZXFONT_BUILD_TESTS)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/fonts/zx-spectrum-unicode-8x8.psf"
+        "${CMAKE_CURRENT_BINARY_DIR}/fonts/zx-spectrum-unicode-8x8.psf"
+        COPYONLY
+    )
+endif()
 
 if(ZXFONT_BUILD_EXAMPLES)
     add_executable(zxfont_basic examples/basic/main.cpp)
@@ -53,6 +63,8 @@ if(ZXFONT_BUILD_TESTS)
     include(CTest)
     add_executable(zxfont_tests tests/test_zxfont.cpp)
     target_link_libraries(zxfont_tests PRIVATE ZXFont::zxfont)
+    target_compile_definitions(zxfont_tests PRIVATE
+        ZXFONT_TEST_FONT_PATH="${CMAKE_CURRENT_BINARY_DIR}/fonts/zx-spectrum-unicode-8x8.psf")
     add_test(NAME zxfont_core COMMAND zxfont_tests)
 
     add_executable(zxfont_demo_tests tests/test_demo_support.cpp)

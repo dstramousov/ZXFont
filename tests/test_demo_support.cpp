@@ -20,6 +20,20 @@ int main() {
             return 1;
         }
     }
+    // Integer scaling is preferred whenever the frame fits at native size.
+    {
+        const auto fit = demo::fitViewport(640, 400, 1920, 1080);
+        if (fit.width != 1280 || fit.height != 800 ||
+            fit.x != 320 || fit.y != 140) {
+            std::cerr << "Noninteger scaling in pixel-perfect mode\n";
+            return 1;
+        }
+        const auto small = demo::fitViewport(640, 400, 320, 200);
+        if (small.width != 320 || small.height != 200) {
+            std::cerr << "Fractional fallback does not fit small window\n";
+            return 1;
+        }
+    }
     try {
         (void)demo::fitViewport(640, 400, 0, 600);
         return 1;

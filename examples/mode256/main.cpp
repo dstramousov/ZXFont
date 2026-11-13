@@ -1,4 +1,5 @@
 #include "../common/demo_support.hpp"
+#include "../common/demo_fonts.hpp"
 #include "../common/sdl_display.hpp"
 
 #include <SDL3/SDL.h>
@@ -55,18 +56,35 @@ void drawWorld(demo::Frame& frame, int hero_x) {
 }
 
 void drawUi(zx::Context& ui, bool help, bool dialog, int scenario,
-            zx::Palette palette) {
+            zx::Palette palette, bool spectrum) {
     ui.text(8, 8, "HP: 100  LVL: 03", kHud);
     ui.text(176, 8, demo::paletteName(palette), kHud);
     if (help) {
         demo::box(ui, 1, 16, 30, 7, kPanel);
         ui.text(24, 136, "F1 HELP  F5 NEXT", kPanel);
         ui.text(24, 144, "SPACE HIDE DIALOG", kPanel);
-        ui.text(24, 152, "F2 PALETTE  ARROWS MOVE", kPanel);
+        ui.text(24, 152, "F2 COLOR F3 FONT", kPanel);
         ui.text(24, 160, "F11 FULLSCREEN", kPanel);
         return;
     }
     if (!dialog) {
+        return;
+    }
+    if (scenario == 3) {
+        // Full-size typography diagnostics, confined to this 256x192 host.
+        demo::box(ui, 1, 4, 30, 19, kPanel);
+        ui.text(16, 40, spectrum ? "ZX UNICODE 8X8" : "LEGACY MIXED 8X8", kHud);
+        ui.text(16, 56, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", kPanel);
+        ui.text(16, 64, "abcdefghijklmnopqrstuvwxyz", kPanel);
+        ui.text(16, 80, "АБВГДЕЁЖЗИЙКЛМНОПР", kPanel);
+        ui.text(16, 88, "СТУФХЦЧШЩЪЫЬЭЮЯ", kPanel);
+        ui.text(16, 104, "абвгдеёжзийклмнопр", kPanel);
+        ui.text(16, 112, "стуфхцчшщъыьэюя", kPanel);
+        ui.text(16, 128, "Ґґ Єє Іі Її", kPanel);
+        ui.text(16, 144, "ШЩЖЫЙФ  0OО 1lІ", kPanel);
+        if (spectrum) {
+            ui.text(16, 160, "┌────┬────┐ ░▒▓█", kHud);
+        }
         return;
     }
     demo::box(ui, 1, 16, 30, 7, kPanel);
@@ -93,6 +111,10 @@ int main() {
                                  3, false);
         demo::Frame frame(kWidth, kHeight);
         zx::Context ui(kWidth, kHeight);
+        const zx::Font legacy_font;
+        const zx::Font spectrum_font = demo::loadSpectrumFont();
+        bool use_spectrum = true;
+        ui.setFont(spectrum_font);
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
         bool running = true;
@@ -114,7 +136,11 @@ int main() {
                             palette = demo::nextPalette(palette);
                             ui.setPalette(palette);
                             break;
-                        case SDLK_F5: scenario = (scenario + 1) % 3; break;
+                        case SDLK_F3:
+                            use_spectrum = !use_spectrum;
+                            ui.setFont(use_spectrum ? spectrum_font : legacy_font);
+                            break;
+                        case SDLK_F5: scenario = (scenario + 1) % 4; break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         case SDLK_SPACE: dialog = !dialog; break;
                         default: break;
@@ -132,10 +158,16 @@ int main() {
             drawWorld(frame, hero_x);
             // Overlay ZXFont onto the game's already-rendered RGBA framebuffer.
             if (help || dialog) {
-                frame.rect(8, 128, 240, 56, zx::paletteColor(palette, {0}));
+                if (!help && scenario == 3) {
+                    frame.rect(8, 32, 240, 152,
+                               zx::paletteColor(palette, {0}));
+                } else {
+                    frame.rect(8, 128, 240, 56,
+                               zx::paletteColor(palette, {0}));
+                }
             }
             ui.clear();
-            drawUi(ui, help, dialog, scenario, palette);
+            drawUi(ui, help, dialog, scenario, palette, use_spectrum);
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

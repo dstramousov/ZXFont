@@ -2,6 +2,7 @@
 #define ZXFONT_EXAMPLES_FRAME_LAYOUT_HPP
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace demo {
@@ -23,8 +24,11 @@ inline Viewport fitViewport(int logical_width, int logical_height,
     }
     const double scale = std::min(static_cast<double>(output_width) / logical_width,
                                   static_cast<double>(output_height) / logical_height);
-    const float width = static_cast<float>(logical_width * scale);
-    const float height = static_cast<float>(logical_height * scale);
+    // Preserve whole physical pixels whenever the output can hold a 1x frame.
+    // Only use a fractional scale when the window is smaller than the canvas.
+    const double effective_scale = scale >= 1.0 ? std::floor(scale) : scale;
+    const float width = static_cast<float>(logical_width * effective_scale);
+    const float height = static_cast<float>(logical_height * effective_scale);
     return {(static_cast<float>(output_width) - width) * 0.5f,
             (static_cast<float>(output_height) - height) * 0.5f,
             width, height};
