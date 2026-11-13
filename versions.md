@@ -57,3 +57,12 @@
 - Keep the minimal `Context::setFont()` / `text()` API and test independent font snapshots, dimensions and built-in/PSF2 pixel equivalence.
 - Repurpose F3 in both SDL3 demos to compare identical embedded/PSF2 font sources; retain F5 typography diagnostics.
 - Update documentation and asset provenance without adding font families prematurely.
+
+## v0.0.8 -> v0.0.9
+
+- Add user-selected ZX Compact Airy 6x8 as an optional PSF2 font; do not include rejected Dense variant.
+- Retain embedded Spectrum Unicode 8x8 as default and automatic fallback on missing, unreadable or invalid external fonts.
+- Introduce compact `Context::setFont(path, &error)` returning load status without changing the existing explicit `Font` API.
+- Switch F3 between distinct 8x8 and 6x8 fonts in both SDL3 demos while preserving 8x8 border geometry.
+- Add focused font coverage, failure/fallback, bitmap and mixed-font regression tests plus reproducible font generator.
+- Document font source, fallback behavior and updated visual controls.

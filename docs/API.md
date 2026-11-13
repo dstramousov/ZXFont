@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.8)
+# ZXFont Core API (v0.0.9)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -37,6 +37,12 @@ ui.text(8, 40, "Кая", {255, 200, 100, 255});
   queued text keeps the font it was originally submitted with. This already
   permits **different glyph dimensions within one frame** with no new API.
   Newline advances by the height of the font captured for each command.
+- `Context::setFont(path, &error)` attempts to select an external PSF2 file.
+  On a missing, unreadable, or malformed file it selects the built-in Spectrum
+  Unicode 8x8, returns `false`, and optionally describes the failure in `error`.
+  On success it returns `true` and clears `error`. This does not alter queued
+  commands (each retains its original font). Out-of-memory errors still throw.
+  `Font::loadPsf2()` remains a strict, throwing loader for callers who want it.
 - When a glyph is missing from the selected font, `text()` throws instead of
   drawing an arbitrary substitute. Call `font.hasGlyph()` to query coverage.
 - Glyphs are monospace, top-to-bottom. All characters in a font use the same
@@ -54,26 +60,25 @@ font families. No TTF rasterizer is needed at runtime.
 ### Several fonts in one UI
 
 ```cpp
-zx::Font compact; // Built-in Spectrum Unicode 8x8.
-zx::Font other = zx::Font::loadPsf2("font_with_other_dimensions.psf");
-ui.setFont(compact);
+zx::Font classic; // Embedded Spectrum Unicode 8x8.
+std::string error;
+ui.setFont(classic);
 ui.text(8, 8, "STATUS", zx::ColorIndex{15});
-ui.setFont(other);
+if (!ui.setFont("fonts/zx-compact-airy-6x8.psf", &error)) {
+    // ZXFont already selected embedded Spectrum 8x8 as fallback.
+    logWarning(error);
+}
 ui.text(8, 32, "Текст другим шрифтом", zx::ColorIndex{12});
-ui.setFont(compact);
+ui.setFont(classic);
 ui.text(8, 64, "> ", zx::ColorIndex{15});
 ```
 
-Each call captures its font; changing the selected font does not restyle
-already queued commands. Pixel coordinates stay absolute; automatic text
-layout/wrapping and per-glyph fallbacks are not part of this milestone.
-The two SDL3 demos use F3 to switch between default embedded data and its
-identical PSF2 source, so their letterforms **should not visibly change**.
-The first genuinely different compact/readability font will be chosen later.
-
-Display scaling is the host's responsibility. In the SDL3 demos the logical
-frame is fitted using integer physical pixels per logical pixel when possible;
-fractional scaling is used only when output is smaller than the framebuffer.
+Font sizes/advances can vary from command to command. The default built-in
+font is still 8x8. Compact Airy is an optional 6x8 external PSF2 asset
+(667 Unicode mappings). It is not automatically loaded by the library; the
+calling application chooses the path. No glyph-by-glyph fallback is performed.
+The SDL3 demos exercise F3 switches, loading failures, and fixed 8x8 borders.
+Display scaling remains the host's responsibility.
 
 ## Palette-indexed colors
 
@@ -120,12 +125,12 @@ For Mode256, the host still owns its framebuffer and presents the frame.
 Direct writes to an indexed 8-bit framebuffer are not supported yet. The
 indexed adapter will be designed against Mode256's actual buffer contract.
 
-## SDL3 visual integration examples (v0.0.8)
+## SDL3 visual integration examples (v0.0.9)
 
 `zxfont_kaya` uses ZXFont for its entire mock terminal. `zxfont_mode256`
 composes ZXFont text on top of a separately rendered 256x192 game framebuffer.
 Both programs own and present their RGBA8 buffers using SDL3, which is **not**
 part of the `ZXFont::zxfont` interface. See `examples/` and `README.md`.
-F2 cycles the four palettes; F3 compares embedded ZX Spectrum Unicode
-against the equivalent external PSF2 asset; F5 shows glyph diagnostic scenes.
+F2 cycles the four palettes; F3 switches embedded ZX Spectrum Unicode 8x8
+against external Compact Airy 6x8; F5 shows glyph diagnostic scenes.
 The SDL3 adapter preserves aspect ratio when resized or fullscreen.

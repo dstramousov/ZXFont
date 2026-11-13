@@ -39,3 +39,25 @@ python3 tools/embed_psf2.py fonts/zx-spectrum-unicode-8x8.psf src/spectrum_unico
 
 The embedded bytes and external file share the same PSF2 parser, so coverage
 and rasterized glyphs must match exactly. Both are tested in `zxfont_tests`.
+
+## ZX Compact Airy 6×8 (v0.0.9)
+
+The `zx-compact-airy-6x8.psf` font is the **user-selected right-hand prototype**
+from the comparison made for ZXFont, not the discarded *Dense* variant.
+It is derived from the above Spectrum Unicode PSF2 using five occupied bitmap
+columns plus one spacing column, with hand-corrected Russian/Ukrainian Cyrillic
+and digits. The result contains the same 667 Unicode mappings and remains
+monochrome (no TTF engine or runtime converter). Some special line-drawing
+glyphs may need manual refinement at 6x8 in a later typography iteration.
+
+Rebuild using only the Python 3 standard library:
+
+```bash
+python3 tools/make_compact_airy.py fonts/zx-spectrum-unicode-8x8.psf fonts/zx-compact-airy-6x8.psf
+```
+
+SHA256: `e82b08d2561fcbdd02106b610eeaef610497fb160d59ac737a30233c866fdd9a`
+
+The Spectrum 8x8 source license/provenance noted above also applies to this
+derivative. ZXFont embeds only the Spectrum font; Compact Airy remains a
+separate optional PSF2 file for safe loading and replacement.

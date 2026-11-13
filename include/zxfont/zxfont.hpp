@@ -119,6 +119,19 @@ public:
     void setFont(Font font) noexcept;
 
     /**
+     * @brief Select an external PSF2 font with built-in fallback.
+     *
+     * On a missing, unreadable, or invalid file, selects the embedded ZX
+     * Spectrum Unicode 8x8 font and returns false. Previously queued commands
+     * retain their fonts. The optional error string receives a diagnostic on
+     * failure and is cleared on success. Allocation failures still propagate.
+     *
+     * @return True if the external font was loaded, false if fallback was used.
+     */
+    [[nodiscard]] bool setFont(const std::filesystem::path& path,
+                               std::string* error = nullptr);
+
+    /**
      * @brief Select a palette for indexed text commands.
      *
      * Previously queued indexed commands are recolored on the next render.

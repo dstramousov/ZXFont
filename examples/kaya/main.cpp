@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <string>
 
 namespace {
 
@@ -16,14 +17,15 @@ constexpr zx::ColorIndex kText{12};
 constexpr zx::ColorIndex kDim{7};
 constexpr zx::ColorIndex kBright{15};
 
-void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible,
-                  zx::Palette palette, bool external) {
-    demo::box(ui, 2, 2, 76, 46, kDim);
-    demo::rule(ui, 2, 6, 76, kDim);
-    demo::rule(ui, 2, 42, 76, kDim);
+void drawTerminal(zx::Context& ui, zx::Context& frames, bool help,
+                  int scenario, bool cursor_visible, zx::Palette palette,
+                  bool compact) {
+    demo::box(frames, 2, 2, 76, 46, kDim);
+    demo::rule(frames, 2, 6, 76, kDim);
+    demo::rule(frames, 2, 42, 76, kDim);
 
     ui.text(32, 28, "ZXFONT / KAYA TERMINAL", kBright);
-    ui.text(360, 28, demo::fontName(external), kBright);
+    ui.text(360, 28, demo::fontName(compact), kBright);
     ui.text(32, 44, "SESSION 001                        STATUS: ONLINE", kDim);
     ui.text(536, 44, demo::paletteName(palette), kBright);
 
@@ -32,7 +34,7 @@ void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible,
         ui.text(48, 112, "ESC  - EXIT", kText);
         ui.text(48, 136, "F1   - TOGGLE HELP", kText);
         ui.text(48, 160, "F2   - CHANGE PALETTE", kText);
-        ui.text(48, 172, "F3   - SWITCH FONT SOURCE", kText);
+        ui.text(48, 172, "F3   - SWITCH 8X8 / 6X8", kText);
         ui.text(48, 184, "F5   - CHANGE DIALOGUE", kText);
         ui.text(48, 208, "F11  - TOGGLE FULLSCREEN", kText);
         ui.text(48, 240, "The text and frames are rendered by ZXFont.", kDim);
@@ -67,14 +69,14 @@ void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible,
         ui.text(48, 252, "┌──────────┬──────────┐", kText);
         ui.text(48, 264, "│ █ ░ ▒ ▓│ ← ↑ → ↓  │", kText);
         ui.text(48, 276, "└──────────┴──────────┘", kText);
-        ui.text(48, 316, "F3: BUILTIN / PSF2 (IDENTICAL GLYPHS)", kDim);
+        ui.text(48, 316, "F3: SPECTRUM 8X8 / COMPACT AIRY 6X8", kDim);
     }
 
     ui.text(40, 352, ">", kBright);
     if (cursor_visible) {
         ui.text(56, 352, "_", kText);
     }
-    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 SOURCE | F5 SCENE | F11 FULL", kDim);
+    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 FONT | F5 SCENE | F11 FULL", kDim);
 }
 
 }  // namespace
@@ -85,12 +87,11 @@ int main() {
         demo::SdlDisplay display("ZXFont / Kaya Terminal", kWidth, kHeight, 2, true);
         demo::Frame frame(kWidth, kHeight);
         zx::Context ui(kWidth, kHeight);
-        const zx::Font builtin_font;
-        const zx::Font external_font = demo::loadSpectrumFont();
-        bool use_external = false;
-        ui.setFont(builtin_font);
+        zx::Context frames(kWidth, kHeight); // Borders stay aligned to 8x8 cells.
+        bool use_compact = false;
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
+        frames.setPalette(palette);
         bool running = true;
         bool help = false;
         int scenario = 0;
@@ -107,10 +108,19 @@ int main() {
                         case SDLK_F2:
                             palette = demo::nextPalette(palette);
                             ui.setPalette(palette);
+                            frames.setPalette(palette);
                             break;
                         case SDLK_F3:
-                            use_external = !use_external;
-                            ui.setFont(use_external ? external_font : builtin_font);
+                            if (use_compact) {
+                                ui.setFont(zx::Font{});
+                                use_compact = false;
+                            } else {
+                                std::string error;
+                                use_compact = ui.setFont(demo::compactFontPath(), &error);
+                                if (!use_compact) {
+                                    std::cerr << "Kaya font fallback: " << error << '\n';
+                                }
+                            }
                             break;
                         case SDLK_F5: scenario = (scenario + 1) % 3; break;
                         case SDLK_F11: display.toggleFullscreen(); break;
@@ -123,9 +133,11 @@ int main() {
             }
             frame.clear(zx::paletteColor(palette, {0}));
             frame.rect(24, 56, 592, 8, zx::paletteColor(palette, {1}));
+            frames.clear();
             ui.clear();
-            drawTerminal(ui, help, scenario, (SDL_GetTicks() / 500) % 2 == 0,
-                         palette, use_external);
+            drawTerminal(ui, frames, help, scenario, (SDL_GetTicks() / 500) % 2 == 0,
+                         palette, use_compact);
+            frames.render(frame.surface());
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

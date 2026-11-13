@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ZXFont VERSION 0.0.8 LANGUAGES CXX)
+project(ZXFont VERSION 0.0.9 LANGUAGES CXX)
 
 add_library(zxfont STATIC src/zxfont.cpp src/font.cpp src/palette.cpp)
 add_library(ZXFont::zxfont ALIAS zxfont)
@@ -22,6 +22,11 @@ if(ZXFONT_BUILD_DEMOS OR ZXFONT_BUILD_TESTS)
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/fonts/zx-spectrum-unicode-8x8.psf"
         "${CMAKE_CURRENT_BINARY_DIR}/fonts/zx-spectrum-unicode-8x8.psf"
+        COPYONLY
+    )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/fonts/zx-compact-airy-6x8.psf"
+        "${CMAKE_CURRENT_BINARY_DIR}/fonts/zx-compact-airy-6x8.psf"
         COPYONLY
     )
 endif()
@@ -64,7 +69,8 @@ if(ZXFONT_BUILD_TESTS)
     add_executable(zxfont_tests tests/test_zxfont.cpp)
     target_link_libraries(zxfont_tests PRIVATE ZXFont::zxfont)
     target_compile_definitions(zxfont_tests PRIVATE
-        ZXFONT_TEST_FONT_PATH="${CMAKE_CURRENT_BINARY_DIR}/fonts/zx-spectrum-unicode-8x8.psf")
+        ZXFONT_TEST_FONT_PATH="${CMAKE_CURRENT_BINARY_DIR}/fonts/zx-spectrum-unicode-8x8.psf"
+        ZXFONT_TEST_COMPACT_PATH="${CMAKE_CURRENT_BINARY_DIR}/fonts/zx-compact-airy-6x8.psf")
     add_test(NAME zxfont_core COMMAND zxfont_tests)
 
     add_executable(zxfont_demo_tests tests/test_demo_support.cpp)

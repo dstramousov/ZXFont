@@ -8,6 +8,7 @@
 #include <exception>
 #include <iostream>
 #include <initializer_list>
+#include <string>
 
 namespace {
 
@@ -55,15 +56,15 @@ void drawWorld(demo::Frame& frame, int hero_x) {
     frame.rect(181, 130, 3, 6, {33, 41, 65, 255});
 }
 
-void drawUi(zx::Context& ui, bool help, bool dialog, int scenario,
-            zx::Palette palette, bool external) {
+void drawUi(zx::Context& ui, zx::Context& frames, bool help,
+            bool dialog, int scenario, zx::Palette palette, bool compact) {
     ui.text(8, 8, "HP: 100  LVL: 03", kHud);
     ui.text(176, 8, demo::paletteName(palette), kHud);
     if (help) {
-        demo::box(ui, 1, 16, 30, 7, kPanel);
+        demo::box(frames, 1, 16, 30, 7, kPanel);
         ui.text(24, 136, "F1 HELP  F5 NEXT", kPanel);
         ui.text(24, 144, "SPACE HIDE DIALOG", kPanel);
-        ui.text(24, 152, "F2 COLOR F3 SOURCE", kPanel);
+        ui.text(24, 152, "F2 COLOR F3 FONT", kPanel);
         ui.text(24, 160, "F11 FULLSCREEN", kPanel);
         return;
     }
@@ -72,8 +73,8 @@ void drawUi(zx::Context& ui, bool help, bool dialog, int scenario,
     }
     if (scenario == 3) {
         // Full-size typography diagnostics, confined to this 256x192 host.
-        demo::box(ui, 1, 4, 30, 19, kPanel);
-        ui.text(16, 40, external ? "ZX UNICODE / PSF2" : "ZX UNICODE / EMBEDDED", kHud);
+        demo::box(frames, 1, 4, 30, 19, kPanel);
+        ui.text(16, 40, compact ? "COMPACT AIRY / 6X8" : "SPECTRUM / 8X8", kHud);
         ui.text(16, 56, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", kPanel);
         ui.text(16, 64, "abcdefghijklmnopqrstuvwxyz", kPanel);
         ui.text(16, 80, "АБВГДЕЁЖЗИЙКЛМНОПР", kPanel);
@@ -85,15 +86,19 @@ void drawUi(zx::Context& ui, bool help, bool dialog, int scenario,
         ui.text(16, 160, "┌────┬────┐ ░▒▓█", kHud);
         return;
     }
-    demo::box(ui, 1, 16, 30, 7, kPanel);
+    demo::box(frames, 1, 16, 30, 7, kPanel);
     if (scenario == 0) {
         ui.text(24, 136, "КАЯ:", kHud);
-        ui.text(24, 152, "Ты уверен, что мир", kPanel);
-        ui.text(24, 160, "реален без наблюдателя?", kPanel);
+        ui.text(24, 152, compact ? "Ты уверен, что мир реален" :
+                                   "Ты уверен, что мир", kPanel);
+        ui.text(24, 160, compact ? "без наблюдателя?" :
+                                   "реален без наблюдателя?", kPanel);
     } else if (scenario == 1) {
         ui.text(24, 136, "ДИМАС:", kHud);
-        ui.text(24, 152, "Я не знаю. Но готов", kPanel);
-        ui.text(24, 160, "это проверить.", kPanel);
+        ui.text(24, 152, compact ? "Я не знаю, но готов проверить" :
+                                   "Я не знаю. Но готов", kPanel);
+        ui.text(24, 160, compact ? "Это можно проверить." :
+                                   "это проверить.", kPanel);
     } else {
         ui.text(24, 136, "КАЯ:", kHud);
         ui.text(24, 152, "Главное - не путать", kPanel);
@@ -109,12 +114,11 @@ int main() {
                                  3, false);
         demo::Frame frame(kWidth, kHeight);
         zx::Context ui(kWidth, kHeight);
-        const zx::Font builtin_font;
-        const zx::Font external_font = demo::loadSpectrumFont();
-        bool use_external = false;
-        ui.setFont(builtin_font);
+        zx::Context frames(kWidth, kHeight); // Fixed 8x8 border grid.
+        bool use_compact = false;
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
+        frames.setPalette(palette);
         bool running = true;
         bool help = false;
         bool dialog = true;
@@ -133,10 +137,19 @@ int main() {
                         case SDLK_F2:
                             palette = demo::nextPalette(palette);
                             ui.setPalette(palette);
+                            frames.setPalette(palette);
                             break;
                         case SDLK_F3:
-                            use_external = !use_external;
-                            ui.setFont(use_external ? external_font : builtin_font);
+                            if (use_compact) {
+                                ui.setFont(zx::Font{});
+                                use_compact = false;
+                            } else {
+                                std::string error;
+                                use_compact = ui.setFont(demo::compactFontPath(), &error);
+                                if (!use_compact) {
+                                    std::cerr << "Mode256 font fallback: " << error << '\n';
+                                }
+                            }
                             break;
                         case SDLK_F5: scenario = (scenario + 1) % 4; break;
                         case SDLK_F11: display.toggleFullscreen(); break;
@@ -164,8 +177,10 @@ int main() {
                                zx::paletteColor(palette, {0}));
                 }
             }
+            frames.clear();
             ui.clear();
-            drawUi(ui, help, dialog, scenario, palette, use_external);
+            drawUi(ui, frames, help, dialog, scenario, palette, use_compact);
+            frames.render(frame.surface());
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

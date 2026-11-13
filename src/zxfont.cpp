@@ -118,6 +118,28 @@ std::uint32_t Context::height() const noexcept { return height_; }
 
 void Context::setFont(Font font) noexcept { font_ = std::move(font); }
 
+bool Context::setFont(const std::filesystem::path& path, std::string* error) {
+    try {
+        Font loaded = Font::loadPsf2(path);
+        setFont(std::move(loaded));
+        if (error) {
+            error->clear();
+        }
+        return true;
+    } catch (const std::invalid_argument& failure) {
+        setFont(Font{});
+        if (error) {
+            *error = failure.what();
+        }
+    } catch (const std::runtime_error& failure) {
+        setFont(Font{});
+        if (error) {
+            *error = failure.what();
+        }
+    }
+    return false;
+}
+
 void Context::setPalette(Palette palette) {
     // Validate before changing the selected palette.
     (void)paletteColor(palette, ColorIndex{0});

@@ -298,6 +298,78 @@ void testExternalPsf2() {
     require(throws<std::invalid_argument>([&] { (void)zx::Font::loadPsf2(path); }));
 }
 
+void testCompactFontAndFallback() {
+    // The selected 6x8 font must be distinct from the built-in 8x8 font.
+    const auto compact_path = std::filesystem::path(ZXFONT_TEST_COMPACT_PATH);
+    const zx::Font compact = zx::Font::loadPsf2(compact_path);
+    require(compact.glyphWidth() == 6 && compact.glyphHeight() == 8);
+    for (const auto cp : U"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                          U"abcdefghijklmnopqrstuvwxyz"
+                          U"АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+                          U"абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+                          U"ҐґЄєІіЇї0123456789┌┐└┘─│█░▒▓") {
+        if (cp != 0) {
+            require(compact.hasGlyph(cp));
+        }
+    }
+
+    zx::Context ui(20, 8);
+    std::string error = "previous error";
+    require(ui.setFont(compact_path, &error));
+    require(error.empty());
+    ui.text(0, 0, "Ж", zx::Color{11, 22, 33, 255});
+
+    // An unavailable font must return to embedded 8x8, while earlier commands
+    // still reference the original 6x8 font. No exception must escape.
+    const auto missing = compact_path.parent_path() / "font_does_not_exist.psf";
+    require(!ui.setFont(missing, &error));
+    require(!error.empty());
+    ui.text(6, 0, "Ж", zx::Color{44, 55, 66, 255});
+    std::array<std::uint8_t, 20 * 8 * 4> pixels{};
+    ui.render({pixels, 20, 8, 20 * 4});
+    // Compact Ж at y=1: #.#.#.  Built-in Ж at y=1: #..#..#.
+    require(pixels[offset(0, 1, 20 * 4)] == 11);
+    require(pixels[offset(2, 1, 20 * 4)] == 11);
+    require(pixels[offset(6, 1, 20 * 4)] == 44);
+    require(pixels[offset(9, 1, 20 * 4)] == 44);
+    require(pixels[offset(5, 1, 20 * 4)] == 0);
+
+    // A file that exists but is corrupt is also a recoverable font error.
+    const auto corrupt_path = std::filesystem::current_path() /
+                              "zxfont_test_corrupt_fallback.psf";
+    struct RemoveFile {
+        std::filesystem::path path;
+        ~RemoveFile() { std::error_code ec; std::filesystem::remove(path, ec); }
+    } cleanup{corrupt_path};
+    {
+        std::ofstream out(corrupt_path, std::ios::binary | std::ios::trunc);
+        require(static_cast<bool>(out));
+        out << "corrupt font data";
+        out.close();
+        require(static_cast<bool>(out));
+    }
+    require(!ui.setFont(corrupt_path, &error));
+    require(!error.empty());
+    ui.clear();
+    ui.text(0, 0, "Ё", zx::Color{1, 2, 3, 255});
+    pixels.fill(0);
+    ui.render({pixels, 20, 8, 20 * 4});
+    require(pixels[offset(2, 0, 20 * 4)] == 1);
+
+    // A valid load after an earlier failure must clear the diagnostic.
+    require(ui.setFont(compact_path, &error));
+    require(error.empty());
+    ui.clear();
+    ui.text(0, 0, "Ж");
+    pixels.fill(0);
+    ui.render({pixels, 20, 8, 20 * 4});
+    require(pixels[offset(2, 1, 20 * 4) + 3] == 255);
+    // Direct loading remains strict for applications that prefer exceptions.
+    require(throws<std::runtime_error>([&] {
+        (void)zx::Font::loadPsf2(missing);
+    }));
+}
+
 void testSpectrumUnicodeFont() {
     const zx::Font builtin;
     const zx::Font spectrum = zx::Font::loadPsf2(ZXFONT_TEST_FONT_PATH);
@@ -377,4 +449,5 @@ int main() {
     testPalettes();
     testExternalPsf2();
     testSpectrumUnicodeFont();
+    testCompactFontAndFallback();
 }

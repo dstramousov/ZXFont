@@ -4,7 +4,7 @@ ZXFont is a C++20 bitmap-text library intended for retro games, terminals and
 character interfaces. Its core is independent of graphics/window libraries;
 SDL3 is used only by two optional visual test applications.
 
-**Current version: v0.0.8.** This milestone provides a compact `zx::Context`
+**Current version: v0.0.9.** This milestone provides a compact `zx::Context`
 API, embedded ZX Spectrum Unicode 8x8 glyphs, strict UTF-8 decoding, PSF2 Unicode
 font loading, RGBA8 framebuffer rendering and four switchable 16-color
 palettes. GUI widgets are not implemented yet; SDL3 display glue remains demo-only.
@@ -38,7 +38,7 @@ render ASCII frames with ZXFont until actual box primitives are added.
 | `Esc` | Exit | Exit |
 | `F1` | Toggle help | Toggle help |
 | `F2` | Switch color palette | Switch overlay color palette |
-| `F3` | Compare embedded / PSF2 font source | Compare embedded / PSF2 font source |
+| `F3` | Switch Spectrum 8×8 / Compact Airy 6×8 | Switch Spectrum 8×8 / Compact Airy 6×8 |
 | `F5` | Change conversation / view font matrix | Change dialogue / view font matrix |
 | `F11` | Toggle fullscreen | Toggle fullscreen |
 | `Space` | — | Show/hide dialogue |
@@ -56,11 +56,13 @@ cmake --build build
 
 To forbid downloading SDL3 when it isn't installed, use
 `-DZXFONT_FETCH_SDL3=OFF`. SDL3 is never linked into the core library.
-F2 cycles Green, Amber, ZX, VGA. F3 switches between the **embedded default**
-Spectrum Unicode 8x8 and the identical Unicode PSF2 loaded from disk. This
-is a source/loader equivalence check, not a different-looking font. F5 shows
-typography diagnostics in both applications. The PSF2 is copied to
-`build/fonts/` when demos or tests are configured.
+F2 cycles Green, Amber, ZX, VGA. F3 switches between the **embedded**
+Spectrum Unicode 8x8 and the **external** Compact Airy 6x8. F5 shows
+font diagnostic scenes in both applications. The PSF2 assets are copied to
+`build/fonts/` when demos or tests are configured. Border glyphs remain on
+an independent 8x8 grid while dialogue text switches to 6x8.
+If the compact file cannot be opened or validated, the demo keeps the built-in
+font and reports the problem to stderr instead of terminating.
 Pixel-perfect output uses whole-number scaling whenever the canvas fits the
 window; smaller windows use a fractional fallback to avoid cropping.
 
@@ -98,18 +100,25 @@ windows use a centered aspect-preserving viewport, without cropping.
 Change the font without changing the rendering API:
 
 ```cpp
-zx::Font font = zx::Font::loadPsf2("my_font.psf");
-ui.setFont(font);
+std::string error;
+if (!ui.setFont("fonts/zx-compact-airy-6x8.psf", &error)) {
+    // The selected font is now the embedded Spectrum 8x8.
+    logWarning(error);
+}
 ui.text(8, 40, "Кая");
 ```
 
 `zx::Font{}` now embeds the **ZX Spectrum Unicode 8x8** font with 667
 Unicode-mapped glyphs. It works without external files. The identical PSF2
-file `fonts/zx-spectrum-unicode-8x8.psf` remains available for loading and
-comparison (see [font provenance](fonts/SOURCE.md)). The older mixed
-ASCII/Cyrillic font has been removed. PSF2 fonts must have Unicode mappings
-and include all requested glyphs. Different fonts can be mixed **within the
-same frame** by calling `setFont()` between `text()` commands; commands keep
+file `fonts/zx-spectrum-unicode-8x8.psf` remains available for reproducibility.
+`fonts/zx-compact-airy-6x8.psf` is the user-selected optional compact font.
+Both contain 667 Unicode mappings (see [font provenance](fonts/SOURCE.md)).
+The older mixed ASCII/Cyrillic font has been removed. PSF2 fonts must have
+Unicode mappings and include all requested glyphs. On an absent or invalid external font,
+`Context::setFont(path, &error)` automatically selects the built-in 8x8 and
+returns `false`; `Font::loadPsf2()` remains strict and throws. Missing
+individual Unicode glyphs are still errors, not silently substituted.
+Different fonts can be mixed **within the same frame** by calling `setFont()` between `text()` commands; commands keep
 their selected font and glyph dimensions. No extra API is needed. See
 [docs/API.md](docs/API.md) for validation, text and glyph behavior, and
 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) for bitmap attribution.
