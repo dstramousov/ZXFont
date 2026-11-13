@@ -146,6 +146,57 @@ void testUnicodeAndSnapshot() {
     require(count_opaque(pixels, 8, 16) > 10);
 }
 
+void testPalettes() {
+    const auto green = zx::paletteColor(zx::Palette::MonoGreen, {10});
+    const auto amber = zx::paletteColor(zx::Palette::MonoAmber, {10});
+    const auto spectrum = zx::paletteColor(zx::Palette::Spectrum, {10});
+    const auto vga = zx::paletteColor(zx::Palette::VGA, {10});
+    require(green.g > green.r && green.g > green.b);
+    require(amber.r > amber.g && amber.g > amber.b);
+    require(spectrum.r == 255 && spectrum.g == 0 && spectrum.b == 0);
+    require(vga.r == 85 && vga.g == 255 && vga.b == 85);
+    for (auto palette : {zx::Palette::MonoGreen, zx::Palette::MonoAmber,
+                         zx::Palette::Spectrum, zx::Palette::VGA}) {
+        for (std::uint8_t i = 0; i < 16; ++i) {
+            require(zx::paletteColor(palette, {i}).a == 255);
+        }
+    }
+    require(throws<std::out_of_range>([] {
+        (void)zx::paletteColor(zx::Palette::VGA, {16});
+    }));
+
+    zx::Context ui(24, 8);
+    ui.text(0, 0, "A", zx::ColorIndex{10});
+    ui.text(8, 0, "A", zx::Color{13, 14, 15, 255});
+    require(throws<std::out_of_range>([&] {
+        ui.text(16, 0, "A", zx::ColorIndex{16});
+    }));
+    require(throws<std::invalid_argument>([&] {
+        ui.setPalette(static_cast<zx::Palette>(255));
+    }));
+    // The same queued commands must render in different palettes, without
+    // rewriting text or changing the explicit-RGBA command.
+    auto check = [&](zx::Palette palette) {
+        std::array<std::uint8_t, 24 * 8 * 4> pixels{};
+        ui.setPalette(palette);
+        ui.render({pixels, 24, 8, 24 * 4});
+        const auto expected = zx::paletteColor(palette, {10});
+        const auto first = offset(2, 0, 24 * 4);
+        const auto second = offset(10, 0, 24 * 4);
+        require(pixels[first] == expected.r);
+        require(pixels[first + 1] == expected.g);
+        require(pixels[first + 2] == expected.b);
+        require(pixels[second] == 13);
+        require(pixels[second + 1] == 14);
+        require(pixels[second + 2] == 15);
+        require(pixels[offset(18, 0, 24 * 4) + 3] == 0);
+    };
+    check(zx::Palette::MonoGreen);
+    check(zx::Palette::MonoAmber);
+    check(zx::Palette::Spectrum);
+    check(zx::Palette::VGA);
+}
+
 void appendLe32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
     for (unsigned shift = 0; shift < 32; shift += 8) {
         bytes.push_back(static_cast<std::uint8_t>(value >> shift));
@@ -236,5 +287,6 @@ int main() {
     testClippingAndBlending();
     testSurfaceValidation();
     testUnicodeAndSnapshot();
+    testPalettes();
     testExternalPsf2();
 }

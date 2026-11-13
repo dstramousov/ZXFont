@@ -11,26 +11,29 @@ namespace {
 
 constexpr int kWidth = 640;
 constexpr int kHeight = 400;
-constexpr zx::Color kText{108, 244, 137, 255};
-constexpr zx::Color kDim{48, 125, 72, 255};
-constexpr zx::Color kBright{202, 255, 210, 255};
+constexpr zx::ColorIndex kText{12};
+constexpr zx::ColorIndex kDim{7};
+constexpr zx::ColorIndex kBright{15};
 
-void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible) {
+void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible,
+                  zx::Palette palette) {
     demo::box(ui, 2, 2, 76, 46, kDim);
     demo::rule(ui, 2, 6, 76, kDim);
     demo::rule(ui, 2, 42, 76, kDim);
 
     ui.text(32, 28, "ZXFONT / KAYA TERMINAL", kBright);
     ui.text(32, 44, "SESSION 001                        STATUS: ONLINE", kDim);
+    ui.text(536, 44, demo::paletteName(palette), kBright);
 
     if (help) {
         ui.text(48, 80, "VISUAL TEST APPLICATION", kBright);
         ui.text(48, 112, "ESC  - EXIT", kText);
         ui.text(48, 136, "F1   - TOGGLE HELP", kText);
-        ui.text(48, 160, "F5   - CHANGE DIALOGUE", kText);
-        ui.text(48, 184, "F11  - TOGGLE FULLSCREEN", kText);
-        ui.text(48, 216, "The text and frames are rendered by ZXFont.", kDim);
-        ui.text(48, 232, "SDL3 only presents the completed RGBA frame.", kDim);
+        ui.text(48, 160, "F2   - CHANGE PALETTE", kText);
+        ui.text(48, 184, "F5   - CHANGE DIALOGUE", kText);
+        ui.text(48, 208, "F11  - TOGGLE FULLSCREEN", kText);
+        ui.text(48, 240, "The text and frames are rendered by ZXFont.", kDim);
+        ui.text(48, 256, "SDL3 only presents the completed RGBA frame.", kDim);
     } else if (scenario == 0) {
         ui.text(48, 76, "КАЯ:", kBright);
         ui.text(48, 92, "Ты уверен, что мир существует без наблюдателя?", kText);
@@ -53,7 +56,7 @@ void drawTerminal(zx::Context& ui, bool help, int scenario, bool cursor_visible)
     if (cursor_visible) {
         ui.text(56, 352, "_", kText);
     }
-    ui.text(16, 392, "ESC QUIT  |  F1 HELP  |  F5 SCENE  |  F11 FULLSCREEN", kDim);
+    ui.text(16, 384, "ESC QUIT | F1 HELP | F2 PALETTE | F5 SCENE | F11 FULLSCREEN", kDim);
 }
 
 }  // namespace
@@ -64,6 +67,8 @@ int main() {
         demo::SdlDisplay display("ZXFont / Kaya Terminal", kWidth, kHeight, 2, true);
         demo::Frame frame(kWidth, kHeight);
         zx::Context ui(kWidth, kHeight);
+        zx::Palette palette = zx::Palette::MonoGreen;
+        ui.setPalette(palette);
         bool running = true;
         bool help = false;
         int scenario = 0;
@@ -77,6 +82,10 @@ int main() {
                     switch (event.key.key) {
                         case SDLK_ESCAPE: running = false; break;
                         case SDLK_F1: help = !help; break;
+                        case SDLK_F2:
+                            palette = demo::nextPalette(palette);
+                            ui.setPalette(palette);
+                            break;
                         case SDLK_F5: scenario = (scenario + 1) % 2; break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         default: break;
@@ -86,10 +95,11 @@ int main() {
             if (!running) {
                 break;
             }
-            frame.clear({4, 16, 9, 255});
-            frame.rect(24, 56, 592, 8, {7, 25, 13, 255});
+            frame.clear(zx::paletteColor(palette, {0}));
+            frame.rect(24, 56, 592, 8, zx::paletteColor(palette, {1}));
             ui.clear();
-            drawTerminal(ui, help, scenario, (SDL_GetTicks() / 500) % 2 == 0);
+            drawTerminal(ui, help, scenario, (SDL_GetTicks() / 500) % 2 == 0,
+                         palette);
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

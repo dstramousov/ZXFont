@@ -1,4 +1,5 @@
 #include "sdl_display.hpp"
+#include "frame_layout.hpp"
 
 #include <cstddef>
 #include <stdexcept>
@@ -28,14 +29,6 @@ SdlDisplay::SdlDisplay(const char* title, int width, int height, int scale,
         if (!SDL_CreateWindowAndRenderer(title, width * scale, height * scale,
                                          flags, &window_, &renderer_)) {
             throw sdlError("SDL_CreateWindowAndRenderer");
-        }
-        // Fullscreen terminals fill the display; windowed game pixels use
-        // integer scaling to keep their pixel grid sharp.
-        const auto presentation = fullscreen ? SDL_LOGICAL_PRESENTATION_LETTERBOX
-                                             : SDL_LOGICAL_PRESENTATION_INTEGER_SCALE;
-        if (!SDL_SetRenderLogicalPresentation(renderer_, width, height,
-                                               presentation)) {
-            throw sdlError("SDL_SetRenderLogicalPresentation");
         }
         texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32,
                                      SDL_TEXTUREACCESS_STREAMING, width, height);
@@ -80,9 +73,23 @@ void SdlDisplay::present(const std::vector<std::uint8_t>& rgba) {
     if (!SDL_UpdateTexture(texture_, nullptr, rgba.data(), width_ * 4)) {
         throw sdlError("SDL_UpdateTexture");
     }
+    int output_width = 0;
+    int output_height = 0;
+    if (!SDL_GetRenderOutputSize(renderer_, &output_width, &output_height)) {
+        throw sdlError("SDL_GetRenderOutputSize");
+    }
+    if (output_width <= 0 || output_height <= 0) {
+        // Minimized window; no visible output is available yet.
+        return;
+    }
+    // Compute a fresh letterbox on every frame: fullscreen, DPI changes, and
+    // window resizing must never crop the logical framebuffer.
+    const auto viewport = fitViewport(width_, height_, output_width, output_height);
+    const SDL_FRect destination{viewport.x, viewport.y,
+                                viewport.width, viewport.height};
     if (!SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255) ||
         !SDL_RenderClear(renderer_) ||
-        !SDL_RenderTexture(renderer_, texture_, nullptr, nullptr) ||
+        !SDL_RenderTexture(renderer_, texture_, nullptr, &destination) ||
         !SDL_RenderPresent(renderer_)) {
         throw sdlError("SDL_Render");
     }

@@ -118,7 +118,23 @@ std::uint32_t Context::height() const noexcept { return height_; }
 
 void Context::setFont(Font font) noexcept { font_ = std::move(font); }
 
+void Context::setPalette(Palette palette) {
+    // Validate before changing the selected palette.
+    (void)paletteColor(palette, ColorIndex{0});
+    palette_ = palette;
+}
+
 void Context::text(int x, int y, std::string_view value, Color color) {
+    appendText(x, y, value, color, false, ColorIndex{0});
+}
+
+void Context::text(int x, int y, std::string_view value, ColorIndex color) {
+    (void)paletteColor(palette_, color);
+    appendText(x, y, value, Color{}, true, color);
+}
+
+void Context::appendText(int x, int y, std::string_view value, Color color,
+                         bool indexed, ColorIndex index) {
     std::u32string decoded;
     decoded.reserve(value.size());
     std::size_t pos = 0;
@@ -131,7 +147,8 @@ void Context::text(int x, int y, std::string_view value, Color color) {
             throw std::invalid_argument("Control character or missing font glyph");
         }
     }
-    commands_.push_back(TextCommand{x, y, std::move(decoded), color, font_});
+    commands_.push_back(TextCommand{x, y, std::move(decoded), color, font_,
+                                    indexed, index});
 }
 
 void Context::clear() noexcept { commands_.clear(); }
@@ -141,6 +158,8 @@ void Context::render(Surface target) const {
     for (const auto& command : commands_) {
         std::int64_t x = command.x;
         std::int64_t y = command.y;
+        const auto color = command.indexed ? paletteColor(palette_, command.index)
+                                           : command.color;
         const auto glyph_width = command.font.glyphWidth();
         const auto glyph_height = command.font.glyphHeight();
         for (const auto codepoint : command.value) {
@@ -153,7 +172,7 @@ void Context::render(Surface target) const {
                 y < height_ && y + glyph_height > 0) {
                 drawGlyph(target, width_, height_, x, y,
                           command.font.bitmap(codepoint), glyph_width,
-                          glyph_height, command.font.bytesPerRow(), command.color);
+                          glyph_height, command.font.bytesPerRow(), color);
             }
             advance(x, glyph_width);
         }

@@ -32,3 +32,11 @@
 - Add a windowed Mode256-style host that draws its own pixel world and overlays ZXFont text.
 - Keep SDL3 outside the ZXFont core; provide automatic pinned SDL3 retrieval for standalone builds.
 - Document visual demo controls, build options, and the framebuffer ownership boundary.
+
+## v0.0.5 -> v0.0.6
+
+- Add four built-in 16-color palettes: Mono Green, Mono Amber, ZX Spectrum, and VGA.
+- Keep explicit RGBA text unchanged; add indexed text recolored at render time via Context::setPalette.
+- Enable F2 palette cycling in Kaya Terminal and Mode256 Simulator without changing fonts or game-world pixels.
+- Fit SDL3 output to the physical window/fullscreen size with a letterboxed viewport to prevent clipping.
+- Add palette, recoloring, and viewport regression tests; document the new API and controls.

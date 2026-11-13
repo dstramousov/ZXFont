@@ -11,6 +11,26 @@
 
 namespace demo {
 
+inline zx::Palette nextPalette(zx::Palette palette) noexcept {
+    switch (palette) {
+        case zx::Palette::MonoGreen: return zx::Palette::MonoAmber;
+        case zx::Palette::MonoAmber: return zx::Palette::Spectrum;
+        case zx::Palette::Spectrum: return zx::Palette::VGA;
+        case zx::Palette::VGA: return zx::Palette::MonoGreen;
+    }
+    return zx::Palette::MonoGreen;
+}
+
+inline const char* paletteName(zx::Palette palette) noexcept {
+    switch (palette) {
+        case zx::Palette::MonoGreen: return "GREEN";
+        case zx::Palette::MonoAmber: return "AMBER";
+        case zx::Palette::Spectrum: return "ZX";
+        case zx::Palette::VGA: return "VGA";
+    }
+    return "UNKNOWN";
+}
+
 // The host owns this buffer. ZXFont only overlays text onto its RGBA pixels.
 class Frame {
 public:
@@ -63,8 +83,9 @@ private:
 };
 
 // Until the public box primitive exists, ASCII frames exercise Context::text.
+template <typename Paint>
 inline void rule(zx::Context& ui, int column, int row, int columns,
-                 zx::Color color) {
+                 Paint color) {
     if (columns < 2) {
         return;
     }
@@ -73,8 +94,9 @@ inline void rule(zx::Context& ui, int column, int row, int columns,
             color);
 }
 
+template <typename Paint>
 inline void box(zx::Context& ui, int column, int row, int columns, int rows,
-                zx::Color color) {
+                Paint color) {
     if (columns < 2 || rows < 2) {
         return;
     }

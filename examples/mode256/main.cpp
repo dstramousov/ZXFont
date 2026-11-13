@@ -12,8 +12,8 @@ namespace {
 
 constexpr int kWidth = 256;
 constexpr int kHeight = 192;
-constexpr zx::Color kHud{239, 239, 169, 255};
-constexpr zx::Color kPanel{196, 224, 242, 255};
+constexpr zx::ColorIndex kHud{15};
+constexpr zx::ColorIndex kPanel{12};
 
 void drawWorld(demo::Frame& frame, int hero_x) {
     // All of this scenery belongs to the host application, not ZXFont.
@@ -54,13 +54,15 @@ void drawWorld(demo::Frame& frame, int hero_x) {
     frame.rect(181, 130, 3, 6, {33, 41, 65, 255});
 }
 
-void drawUi(zx::Context& ui, bool help, bool dialog, int scenario) {
+void drawUi(zx::Context& ui, bool help, bool dialog, int scenario,
+            zx::Palette palette) {
     ui.text(8, 8, "HP: 100  LVL: 03", kHud);
+    ui.text(176, 8, demo::paletteName(palette), kHud);
     if (help) {
         demo::box(ui, 1, 16, 30, 7, kPanel);
         ui.text(24, 136, "F1 HELP  F5 NEXT", kPanel);
         ui.text(24, 144, "SPACE HIDE DIALOG", kPanel);
-        ui.text(24, 152, "ARROWS MOVE HERO", kPanel);
+        ui.text(24, 152, "F2 PALETTE  ARROWS MOVE", kPanel);
         ui.text(24, 160, "F11 FULLSCREEN", kPanel);
         return;
     }
@@ -91,6 +93,8 @@ int main() {
                                  3, false);
         demo::Frame frame(kWidth, kHeight);
         zx::Context ui(kWidth, kHeight);
+        zx::Palette palette = zx::Palette::MonoGreen;
+        ui.setPalette(palette);
         bool running = true;
         bool help = false;
         bool dialog = true;
@@ -106,6 +110,10 @@ int main() {
                     switch (event.key.key) {
                         case SDLK_ESCAPE: running = false; break;
                         case SDLK_F1: help = !help; break;
+                        case SDLK_F2:
+                            palette = demo::nextPalette(palette);
+                            ui.setPalette(palette);
+                            break;
                         case SDLK_F5: scenario = (scenario + 1) % 3; break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         case SDLK_SPACE: dialog = !dialog; break;
@@ -124,10 +132,10 @@ int main() {
             drawWorld(frame, hero_x);
             // Overlay ZXFont onto the game's already-rendered RGBA framebuffer.
             if (help || dialog) {
-                frame.rect(8, 128, 240, 56, {12, 22, 33, 255});
+                frame.rect(8, 128, 240, 56, zx::paletteColor(palette, {0}));
             }
             ui.clear();
-            drawUi(ui, help, dialog, scenario);
+            drawUi(ui, help, dialog, scenario, palette);
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

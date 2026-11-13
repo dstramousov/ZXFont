@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ZXFont VERSION 0.0.5 LANGUAGES CXX)
+project(ZXFont VERSION 0.0.6 LANGUAGES CXX)
 
-add_library(zxfont STATIC src/zxfont.cpp src/font.cpp)
+add_library(zxfont STATIC src/zxfont.cpp src/font.cpp src/palette.cpp)
 add_library(ZXFont::zxfont ALIAS zxfont)
 
 target_compile_features(zxfont PUBLIC cxx_std_20)

@@ -4,10 +4,10 @@ ZXFont is a C++20 bitmap-text library intended for retro games, terminals and
 character interfaces. Its core is independent of graphics/window libraries;
 SDL3 is used only by two optional visual test applications.
 
-**Current version: v0.0.5.** This milestone provides a compact `zx::Context`
+**Current version: v0.0.6.** This milestone provides a compact `zx::Context`
 API, embedded 8x8 ASCII/Cyrillic glyphs, strict UTF-8 decoding, PSF2 Unicode
-font loading and RGBA8 framebuffer rendering. GUI widgets and palette
-switching are not implemented yet; SDL3 display glue remains demo-only.
+font loading, RGBA8 framebuffer rendering and four switchable 16-color
+palettes. GUI widgets are not implemented yet; SDL3 display glue remains demo-only.
 
 ## Build and test
 
@@ -37,6 +37,7 @@ render ASCII frames with ZXFont until actual box primitives are added.
 | --- | --- | --- |
 | `Esc` | Exit | Exit |
 | `F1` | Toggle help | Toggle help |
+| `F2` | Switch color palette | Switch overlay color palette |
 | `F5` | Change mock conversation | Change mock dialogue |
 | `F11` | Toggle fullscreen | Toggle fullscreen |
 | `Space` | — | Show/hide dialogue |
@@ -54,7 +55,7 @@ cmake --build build
 
 To forbid downloading SDL3 when it isn't installed, use
 `-DZXFONT_FETCH_SDL3=OFF`. SDL3 is never linked into the core library.
-`F2`/`F3` are reserved for future palette/font switching, not implemented yet.
+`F3` is reserved for future font switching. F2 cycles Green, Amber, ZX, VGA.
 
 ## Integrating in another CMake project
 
@@ -72,6 +73,20 @@ ui.text(8, 8, "HELLO ZXFONT", {0, 255, 0, 255});
 ui.text(8, 24, "Привет, Кая!");
 ui.render({pixels, 256, 192, 256 * 4});
 ```
+
+Render palette-indexed text independently of the selected font:
+
+```cpp
+ui.setPalette(zx::Palette::Spectrum);
+ui.text(8, 56, "Spectrum red", zx::ColorIndex{10});
+ui.setPalette(zx::Palette::VGA); // The already queued text becomes VGA green.
+```
+
+Direct RGBA text colors remain unchanged on palette switches. In both visual
+applications F2 switches through Green, Amber, ZX Spectrum and VGA. Kaya's
+entire screen uses the active palette; Mode256's game graphics remain owned by
+the host and only the ZXFont overlay changes palette. Fullscreen and resized
+windows use a centered aspect-preserving viewport, without cropping.
 
 Change the font without changing the rendering API:
 

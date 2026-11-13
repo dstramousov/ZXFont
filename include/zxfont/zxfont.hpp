@@ -20,6 +20,22 @@ struct Color {
     std::uint8_t a = 255;
 };
 
+/** @brief Built-in 16-color palette, independent of glyph bitmaps. */
+enum class Palette { MonoGreen, MonoAmber, Spectrum, VGA };
+
+/** @brief Color index (0..15) resolved from the active palette at render time. */
+struct ColorIndex {
+    std::uint8_t value;
+};
+
+/**
+ * @brief Resolve a palette entry to an RGBA color.
+ *
+ * @throws std::out_of_range If the index is outside [0, 15].
+ * @throws std::invalid_argument If the palette identifier is unknown.
+ */
+[[nodiscard]] Color paletteColor(Palette palette, ColorIndex color);
+
 /**
  * @brief Non-owning, top-to-bottom, left-to-right RGBA8 pixel surface.
  *
@@ -101,6 +117,14 @@ public:
     void setFont(Font font) noexcept;
 
     /**
+     * @brief Select a palette for indexed text commands.
+     *
+     * Previously queued indexed commands are recolored on the next render.
+     * Commands with explicit RGBA colors are never affected.
+     */
+    void setPalette(Palette palette);
+
+    /**
      * @brief Add UTF-8 text at pixel coordinates, using the selected font.
      *
      * LF resets x and advances y by the active font's glyph height. Only
@@ -110,6 +134,14 @@ public:
      *                               or control characters other than LF.
      */
     void text(int x, int y, std::string_view value, Color color = {});
+
+    /**
+     * @brief Queue palette-indexed UTF-8 text, resolved on every render.
+     *
+     * @throws std::out_of_range If the index is outside [0, 15].
+     * @throws std::invalid_argument For invalid UTF-8 or missing glyphs.
+     */
+    void text(int x, int y, std::string_view value, ColorIndex color);
 
     /** @brief Remove all queued drawing commands without changing any pixels. */
     void clear() noexcept;
@@ -133,11 +165,17 @@ private:
         std::u32string value;
         Color color;
         Font font;
+        bool indexed = false;
+        ColorIndex index{0};
     };
+
+    void appendText(int x, int y, std::string_view value, Color color,
+                    bool indexed, ColorIndex index);
 
     std::uint32_t width_;
     std::uint32_t height_;
     Font font_;
+    Palette palette_ = Palette::MonoGreen;
     std::vector<TextCommand> commands_;
 };
 
