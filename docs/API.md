@@ -416,3 +416,81 @@ reply.draw(ui, viewport);                    // Scrolled rendering preserves sty
 - Backgrounds cover glyph cells, including spaces, and follow alpha blending. Indexed colors are resolved at `render()` time; explicit RGBA colors stay fixed.
 - Unsupported glyphs, malformed UTF-8, and out-of-range indexed colors are rejected. Changing font requires new `setStyledText()`/`configure()` calls, just like plain text.
 - Styles survive word wrapping and dropped separator spaces. `TextReveal::visibleCharacters()` still counts Unicode codepoints rather than UTF-8 bytes; viewport paints only visible rows. The `color` argument of `TextReveal::draw()` is ignored for a styled message (colors come from the fragments); its cursor still uses `RevealOptions::cursorColor`.
+
+
+## ZXCRT postprocessing (v0.0.18)
+
+Header: `<zxcrt/zxcrt.hpp>`, CMake target: `ZXFont::zxcrt`.
+This independent C++20 library does not depend on ZXFont or SDL. It takes
+packed top-down RGBA8 source pixels, uploads them to a GPU texture, and renders
+one fullscreen triangle using an embedded GLSL 330 Core shader. No runtime
+shader files are required. Source pixels are sampled with nearest filtering;
+the glow is added separately so the unblurred original remains legible.
+
+### Setup and ownership
+
+Create a compatible OpenGL **3.3 core** context with your window system, make it
+current, and pass a GL function loader:
+
+```cpp
+zxcrt::GLProcedure myGLLoader(const char* name) {
+    return reinterpret_cast<zxcrt::GLProcedure>(SDL_GL_GetProcAddress(name));
+}
+
+// After SDL_GL_CreateContext(window):
+zxcrt::Renderer crt(myGLLoader);
+```
+
+The SDL call is only an adapter example: GLFW's or another application's
+function resolver can be used. `GLProcLoader` has type
+`GLProcedure (*)(const char*)` and must resolve OpenGL 3.3 procedures in the
+current context. The renderer owns its shaders, program, vertex array and
+texture; the caller retains ownership of the GL context, framebuffer,
+window, and RGBA source pixels. Construct, render, and destroy with the same
+current context on the same thread. The caller performs swap/present.
+
+`render(std::span<const uint8_t> rgba, int sourceWidth, int sourceHeight,
+int outputWidth, int outputHeight)` validates that the input is exactly
+`w*h*4` bytes and that dimensions are positive. `outputWidth/Height` are
+**physical framebuffer pixels**, not logical window coordinates. Output goes
+to the currently bound GL framebuffer; it is cleared to opaque black and the
+content is letterboxed to preserve aspect ratio. Previous GL program, VAO,
+texture-unit-0 binding, active texture, viewport, pixel-unpack alignment,
+clear color, and depth/blend/scissor/cull enable states are restored before
+return. The framebuffer contents deliberately change. The source buffer is
+never modified.
+
+### Settings
+
+```cpp
+zxcrt::Settings settings;     // enabled=true, subtle defaults.
+settings.curvature = 0.055f; // [0, 0.3] barrel warp.
+settings.glow = 0.20f;       // [0, 1] additive, softly sampled halo.
+settings.scanlines = 0.14f;  // [0, 1] line darkening at source pixel pitch.
+settings.vignette = 0.12f;   // [0, 1] darker image corners.
+crt.setSettings(settings);
+
+settings.enabled = false;
+crt.setSettings(settings);    // Plain presentation; no effect strengths.
+```
+
+No JSON or global mutable settings. `validateSettings` and `setSettings`
+reject NaN, infinity, and values outside the documented ranges with
+`std::invalid_argument`. `fitViewport` is an independent tested utility that
+returns a bottom-left-origin rectangle in output pixels.
+
+### Building
+
+Both static libraries build without SDL3 or an OpenGL development package:
+
+```sh
+cmake -S . -B build -DZXFONT_BUILD_DEMOS=OFF
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The standalone SDL3 test application `zxfont_crt_demo` is built when visual
+examples are enabled. It requires a functional desktop OpenGL 3.3 Core driver.
+F1 toggles effects, F2 curvature, F3 glow, F4 scanlines, F5 vignette, F6
+amber/green test card, F11 fullscreen, Escape exit. Mode256 and Kaya continue
+to use their original display paths without any automatic CRT processing.

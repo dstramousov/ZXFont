@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ZXFont VERSION 0.0.17 LANGUAGES CXX)
+project(ZXFont VERSION 0.0.18 LANGUAGES CXX)
 
 add_library(zxfont STATIC src/zxfont.cpp src/font.cpp src/palette.cpp)
 add_library(ZXFont::zxfont ALIAS zxfont)
@@ -11,6 +11,18 @@ target_include_directories(zxfont PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
+# The CRT target is a self-contained OpenGL 3.3 postprocessor. Functions are
+# resolved through an application-supplied callback, so this target does not
+# link to SDL3, libGL, or the ZXFont text renderer.
+add_library(zxcrt STATIC src/crt/zxcrt.cpp src/crt/gl_renderer.cpp)
+add_library(ZXFont::zxcrt ALIAS zxcrt)
+target_compile_features(zxcrt PUBLIC cxx_std_20)
+target_include_directories(zxcrt PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+option(ZXFONT_BUILD_CRT_DEMO "Build the SDL3/OpenGL CRT test application" ${PROJECT_IS_TOP_LEVEL})
 option(ZXFONT_BUILD_EXAMPLES "Build ZXFont headless examples" ${PROJECT_IS_TOP_LEVEL})
 option(ZXFONT_BUILD_TESTS "Build ZXFont tests" ${PROJECT_IS_TOP_LEVEL})
 option(ZXFONT_BUILD_DEMOS "Build the interactive SDL3 visual test applications" ${PROJECT_IS_TOP_LEVEL})
@@ -62,6 +74,12 @@ if(ZXFONT_BUILD_DEMOS)
         )
         target_link_libraries(zxfont_${demo} PRIVATE ZXFont::zxfont SDL3::SDL3)
     endforeach()
+
+    if(ZXFONT_BUILD_CRT_DEMO)
+        add_executable(zxfont_crt_demo examples/crt_demo/main.cpp)
+        target_link_libraries(zxfont_crt_demo PRIVATE
+            ZXFont::zxfont ZXFont::zxcrt SDL3::SDL3)
+    endif()
 endif()
 
 if(ZXFONT_BUILD_TESTS)
@@ -76,4 +94,8 @@ if(ZXFONT_BUILD_TESTS)
     add_executable(zxfont_demo_tests tests/test_demo_support.cpp)
     target_link_libraries(zxfont_demo_tests PRIVATE ZXFont::zxfont)
     add_test(NAME zxfont_demo_support COMMAND zxfont_demo_tests)
+
+    add_executable(zxcrt_tests tests/test_zxcrt.cpp)
+    target_link_libraries(zxcrt_tests PRIVATE ZXFont::zxcrt)
+    add_test(NAME zxcrt_core COMMAND zxcrt_tests)
 endif()

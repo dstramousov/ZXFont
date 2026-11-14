@@ -132,3 +132,11 @@
 - Preserve Spectrum INVERSE video in styled text across the entire glyph cell including spaces; verify explicit and default PAPER colors, dynamic palettes, and 8x8 / 6x8 fonts with pixel-level tests.
 - Showcase inverse highlighting in dialogue demos, and add F10 line spacing (0..3) without introducing a configuration file; update the README/API reference.
 - Close the font/text rendering feature cycle. CRT postprocessing is a separate future module, not part of this release.
+
+## v0.0.17 -> v0.0.18
+
+- Add the independent `ZXFont::zxcrt` static CMake target in the same repository; keep `ZXFont::zxfont` and both existing demos unchanged.
+- Add OpenGL 3.3 CRT postprocessing with an SDL-independent function-loader API and embedded GLSL shaders (curvature, additive phosphor glow, scanlines, vignette).
+- Allow runtime settings and bypass, preserve aspect ratio, support resizable output and caller-owned RGBA8 frames with no config files or runtime shader assets.
+- Add the `zxfont_crt_demo` SDL3/OpenGL test card with live effect controls, spectrum-style text, geometry grid, and color samples.
+- Test settings validation, viewport geometry, and standalone headless builds; document the CRT API and its GL context lifetime requirements.
