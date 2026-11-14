@@ -81,3 +81,13 @@
 - Respect selected font metrics, letter spacing, explicit newlines, and overlong words.
 - Render dialogue text using the same layout path in Kaya Terminal and Mode256 Simulator.
 - Add regression tests for wrapping, errors, per-command font snapshots, and metrics.
+
+## v0.0.11 -> v0.0.12
+
+- Correct double-border vertical pixel columns to match corners and junctions; add pixel-level seam regression checks.
+- Add `Context::box()` and `Context::line()` for 8x8 pseudographics without introducing a GUI runtime.
+- Support single, double, and solid-block borders; horizontal and vertical lines; automatic junction glyphs on the same grid.
+- Add optional RGBA/palette-indexed panel fills, clipping, and per-command drawing order.
+- Keep frame geometry on the embedded Spectrum Unicode 8x8 grid independently of selected 6x8 text and letter spacing.
+- Move Kaya and Mode256 demos from hand-built text frames and separate border contexts to the shared ZXFont primitives.
+- Add regression tests for junctions, fonts, colors, validation, and clipped geometry.

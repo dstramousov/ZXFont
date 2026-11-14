@@ -17,12 +17,12 @@ constexpr zx::ColorIndex kText{12};
 constexpr zx::ColorIndex kDim{7};
 constexpr zx::ColorIndex kBright{15};
 
-void drawTerminal(zx::Context& ui, zx::Context& frames, bool help,
+void drawTerminal(zx::Context& ui, bool help,
                   int scenario, bool cursor_visible, zx::Palette palette,
                   bool compact, std::uint32_t compact_spacing) {
-    demo::box(frames, 2, 2, 76, 46, kDim);
-    demo::rule(frames, 2, 6, 76, kDim);
-    demo::rule(frames, 2, 42, 76, kDim);
+    ui.box(16, 16, 608, 368, zx::Border::Single, kDim);
+    ui.line(16, 48, 608, zx::Axis::Horizontal, zx::Border::Single, kDim);
+    ui.line(16, 336, 608, zx::Axis::Horizontal, zx::Border::Single, kDim);
 
     ui.text(32, 28, "ZXFONT / KAYA TERMINAL", kBright);
     ui.text(360, 28, demo::fontName(compact), kBright);
@@ -56,7 +56,7 @@ void drawTerminal(zx::Context& ui, zx::Context& frames, bool help,
         ui.textBox(48, 140, 350, "Возможно, оба. Но это еще не доказательство.", kText);
         ui.text(48, 172, "КАЯ:", kBright);
         ui.textBox(48, 188, 350, "Согласна. Проведем эксперимент.", kText);
-    } else {
+    } else if (scenario == 2) {
         // Same samples with either font: a visual regression chart.
         ui.text(48, 76, "FONT MATRIX / LATIN + CYRILLIC", kBright);
         ui.text(48, 96, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", kText);
@@ -71,6 +71,25 @@ void drawTerminal(zx::Context& ui, zx::Context& frames, bool help,
         ui.text(48, 264, "│ █ ░ ▒ ▓│ ← ↑ → ↓  │", kText);
         ui.text(48, 276, "└──────────┴──────────┘", kText);
         ui.text(48, 316, "F3 FONT / F4 COMPACT SPACING 0-2", kDim);
+    } else {
+        // The primitives below always use the built-in 8x8 box glyphs.
+        ui.text(48, 76, "BORDERS / JOINS / PALETTE", kBright);
+        ui.box(48, 104, 192, 64, zx::Border::Single, kText,
+               zx::ColorIndex{0});
+        ui.line(48, 128, 192, zx::Axis::Horizontal, zx::Border::Single, kText);
+        ui.text(64, 112, "SINGLE + DIVIDER", kBright);
+        ui.text(64, 144, "AUTO T-JUNCTIONS", kText);
+        ui.box(272, 104, 224, 64, zx::Border::Double, kText);
+        ui.line(272, 136, 224, zx::Axis::Horizontal, zx::Border::Double, kText);
+        ui.text(288, 112, "DOUBLE", kBright);
+        ui.text(288, 144, "EQUAL STROKES", kText);
+        ui.box(48, 192, 256, 80, zx::Border::Block, kDim,
+               zx::ColorIndex{0});
+        ui.text(64, 216, "BLOCK BORDER / FILLED", kBright);
+        ui.box(336, 192, 160, 80, zx::Border::Single, kText);
+        ui.line(408, 208, 48, zx::Axis::Vertical, zx::Border::Single, kText);
+        ui.line(368, 224, 112, zx::Axis::Horizontal, zx::Border::Single, kText);
+        ui.text(48, 296, "F2 COLOR / F3 FONT / F5 NEXT", kDim);
     }
 
     if (compact) {
@@ -91,12 +110,10 @@ int main() {
         demo::SdlDisplay display("ZXFont / Kaya Terminal", kWidth, kHeight, 2, true);
         demo::Frame frame(kWidth, kHeight);
         zx::Context ui(kWidth, kHeight);
-        zx::Context frames(kWidth, kHeight); // Borders stay aligned to 8x8 cells.
         bool use_compact = false;
         std::uint32_t compact_spacing = 1;
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
-        frames.setPalette(palette);
         bool running = true;
         bool help = false;
         int scenario = 0;
@@ -113,7 +130,6 @@ int main() {
                         case SDLK_F2:
                             palette = demo::nextPalette(palette);
                             ui.setPalette(palette);
-                            frames.setPalette(palette);
                             break;
                         case SDLK_F3:
                             if (use_compact) {
@@ -135,7 +151,7 @@ int main() {
                                 ui.setLetterSpacing(compact_spacing);
                             }
                             break;
-                        case SDLK_F5: scenario = (scenario + 1) % 3; break;
+                        case SDLK_F5: scenario = (scenario + 1) % 4; break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         default: break;
                     }
@@ -145,12 +161,11 @@ int main() {
                 break;
             }
             frame.clear(zx::paletteColor(palette, {0}));
-            frame.rect(24, 56, 592, 8, zx::paletteColor(palette, {1}));
-            frames.clear();
             ui.clear();
-            drawTerminal(ui, frames, help, scenario, (SDL_GetTicks() / 500) % 2 == 0,
+            ui.line(24, 56, 592, zx::Axis::Horizontal,
+                    zx::Border::Block, zx::ColorIndex{1});
+            drawTerminal(ui, help, scenario, (SDL_GetTicks() / 500) % 2 == 0,
                          palette, use_compact, compact_spacing);
-            frames.render(frame.surface());
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

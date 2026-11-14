@@ -82,32 +82,6 @@ private:
     std::vector<std::uint8_t> pixels_;
 };
 
-// Until the public box primitive exists, ASCII frames exercise Context::text.
-template <typename Paint>
-inline void rule(zx::Context& ui, int column, int row, int columns,
-                 Paint color) {
-    if (columns < 2) {
-        return;
-    }
-    ui.text(column * 8, row * 8,
-            "+" + std::string(static_cast<std::size_t>(columns - 2), '-') + "+",
-            color);
-}
-
-template <typename Paint>
-inline void box(zx::Context& ui, int column, int row, int columns, int rows,
-                Paint color) {
-    if (columns < 2 || rows < 2) {
-        return;
-    }
-    rule(ui, column, row, columns, color);
-    for (int r = row + 1; r < row + rows - 1; ++r) {
-        ui.text(column * 8, r * 8, "|", color);
-        ui.text((column + columns - 1) * 8, r * 8, "|", color);
-    }
-    rule(ui, column, row + rows - 1, columns, color);
-}
-
 }  // namespace demo
 
 #endif  // ZXFONT_EXAMPLES_DEMO_SUPPORT_HPP

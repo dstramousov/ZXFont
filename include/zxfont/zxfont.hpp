@@ -5,10 +5,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
 
 namespace zx {
 
@@ -27,6 +29,12 @@ enum class Palette { MonoGreen, MonoAmber, Spectrum, VGA };
 struct ColorIndex {
     std::uint8_t value;
 };
+
+/** @brief Built-in 8x8 box-drawing styles independent of the text font. */
+enum class Border { Single, Double, Block };
+
+/** @brief Orientation of a pseudographic line. */
+enum class Axis { Horizontal, Vertical };
 
 /**
  * @brief Resolve a palette entry to an RGBA color.
@@ -104,7 +112,7 @@ struct TextMetrics {
  * @brief Stores text drawing commands for a logical pixel-sized canvas.
  *
  * This context does not own a framebuffer or an application window. Rendering
- * draws only foreground glyph pixels into an existing RGBA8 surface.
+ * draws text and pseudographic primitives into an existing RGBA8 surface.
  */
 class Context {
 public:
@@ -203,6 +211,41 @@ public:
     void textBox(int x, int y, std::uint32_t max_width,
                  std::string_view value, ColorIndex color);
 
+    /**
+     * @brief Queue a pixel-positioned border and optional filled background.
+     *
+     * Width and height must be multiples of 8, each at least 16 pixels.
+     * Borders use the embedded Spectrum Unicode 8x8 glyphs regardless of the
+     * currently selected text font or its letter spacing. The optional fill
+     * covers the complete rectangle; subsequent commands can draw on top.
+     *
+     * @throws std::invalid_argument For invalid dimensions or border style.
+     */
+    void box(int x, int y, std::uint32_t width, std::uint32_t height,
+             Border border = Border::Single, Color color = {},
+             std::optional<Color> fill = std::nullopt);
+
+    /** @brief Palette-indexed box, recolored with setPalette(). */
+    void box(int x, int y, std::uint32_t width, std::uint32_t height,
+             Border border, ColorIndex color,
+             std::optional<ColorIndex> fill = std::nullopt);
+
+    /**
+     * @brief Queue an 8-pixel-grid line, joining matching box borders.
+     *
+     * Length must be a positive multiple of 8. Intersection glyphs are
+     * automatically chosen for crossing lines and compatible borders.
+     * Shapes join when their 8x8 cell coordinates and border styles match.
+     *
+     * @throws std::invalid_argument For invalid length, axis or border style.
+     */
+    void line(int x, int y, std::uint32_t length, Axis axis,
+              Border border = Border::Single, Color color = {});
+
+    /** @brief Palette-indexed line, recolored with setPalette(). */
+    void line(int x, int y, std::uint32_t length, Axis axis,
+              Border border, ColorIndex color);
+
     /** @brief Remove all queued drawing commands without changing any pixels. */
     void clear() noexcept;
 
@@ -230,6 +273,30 @@ private:
         ColorIndex index{0};
     };
 
+    struct BoxCommand {
+        int x;
+        int y;
+        std::uint32_t width;
+        std::uint32_t height;
+        Border border;
+        Color color;
+        std::optional<Color> fill;
+        bool indexed = false;
+        ColorIndex index{0};
+        std::optional<ColorIndex> fill_index;
+    };
+
+    struct LineCommand {
+        int x;
+        int y;
+        std::uint32_t length;
+        Axis axis;
+        Border border;
+        Color color;
+        bool indexed = false;
+        ColorIndex index{0};
+    };
+
     void appendText(int x, int y, std::string_view value, Color color,
                     bool indexed, ColorIndex index);
     void appendBox(int x, int y, std::uint32_t max_width,
@@ -241,7 +308,7 @@ private:
     Font font_;
     std::uint32_t letter_spacing_ = 0;
     Palette palette_ = Palette::MonoGreen;
-    std::vector<TextCommand> commands_;
+    std::vector<std::variant<TextCommand, BoxCommand, LineCommand>> commands_;
 };
 
 }  // namespace zx

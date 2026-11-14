@@ -56,13 +56,14 @@ void drawWorld(demo::Frame& frame, int hero_x) {
     frame.rect(181, 130, 3, 6, {33, 41, 65, 255});
 }
 
-void drawUi(zx::Context& ui, zx::Context& frames, bool help,
+void drawUi(zx::Context& ui, bool help,
             bool dialog, int scenario, zx::Palette palette, bool compact,
             std::uint32_t compact_spacing) {
     ui.text(8, 8, "HP: 100  LVL: 03", kHud);
     ui.text(176, 8, demo::paletteName(palette), kHud);
     if (help) {
-        demo::box(frames, 1, 16, 30, 7, kPanel);
+        ui.box(8, 128, 240, 56, zx::Border::Single, kPanel,
+               zx::ColorIndex{0});
         ui.text(24, 136, "F1 HELP  F5 NEXT", kPanel);
         ui.text(24, 144, "SPACE HIDE DIALOG", kPanel);
         ui.text(24, 152, "F2 COLOR F3 FONT", kPanel);
@@ -74,7 +75,8 @@ void drawUi(zx::Context& ui, zx::Context& frames, bool help,
     }
     if (scenario == 3) {
         // Full-size typography diagnostics, confined to this 256x192 host.
-        demo::box(frames, 1, 4, 30, 19, kPanel);
+        ui.box(8, 32, 240, 152, zx::Border::Single, kPanel,
+               zx::ColorIndex{0});
         ui.text(16, 40, compact ? "COMPACT AIRY / 6X8" : "SPECTRUM / 8X8", kHud);
         if (compact) {
             ui.text(168, 40, "GAP " + std::to_string(compact_spacing), kHud);
@@ -90,7 +92,17 @@ void drawUi(zx::Context& ui, zx::Context& frames, bool help,
         ui.text(16, 160, "┌────┬────┐ ░▒▓█", kHud);
         return;
     }
-    demo::box(frames, 1, 16, 30, 7, kPanel);
+    if (scenario == 4) {
+        ui.box(8, 128, 240, 56, zx::Border::Double, kPanel,
+               zx::ColorIndex{0});
+        ui.line(8, 152, 240, zx::Axis::Horizontal,
+                zx::Border::Double, kPanel);
+        ui.text(24, 136, "DOUBLE BORDER", kHud);
+        ui.text(24, 160, "F3 FONT / F5 NEXT", kPanel);
+        return;
+    }
+    ui.box(8, 128, 240, 56, zx::Border::Single, kPanel,
+           zx::ColorIndex{0});
     if (scenario == 0) {
         ui.text(24, 136, "КАЯ:", kHud);
         ui.textBox(24, 152, 208,
@@ -114,12 +126,10 @@ int main() {
                                  3, false);
         demo::Frame frame(kWidth, kHeight);
         zx::Context ui(kWidth, kHeight);
-        zx::Context frames(kWidth, kHeight); // Fixed 8x8 border grid.
         bool use_compact = false;
         std::uint32_t compact_spacing = 1;
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
-        frames.setPalette(palette);
         bool running = true;
         bool help = false;
         bool dialog = true;
@@ -138,7 +148,6 @@ int main() {
                         case SDLK_F2:
                             palette = demo::nextPalette(palette);
                             ui.setPalette(palette);
-                            frames.setPalette(palette);
                             break;
                         case SDLK_F3:
                             if (use_compact) {
@@ -160,7 +169,7 @@ int main() {
                                 ui.setLetterSpacing(compact_spacing);
                             }
                             break;
-                        case SDLK_F5: scenario = (scenario + 1) % 4; break;
+                        case SDLK_F5: scenario = (scenario + 1) % 5; break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         case SDLK_SPACE: dialog = !dialog; break;
                         default: break;
@@ -176,21 +185,10 @@ int main() {
                                 static_cast<int>(left), 8, 157);
 
             drawWorld(frame, hero_x);
-            // Overlay ZXFont onto the game's already-rendered RGBA framebuffer.
-            if (help || dialog) {
-                if (!help && scenario == 3) {
-                    frame.rect(8, 32, 240, 152,
-                               zx::paletteColor(palette, {0}));
-                } else {
-                    frame.rect(8, 128, 240, 56,
-                               zx::paletteColor(palette, {0}));
-                }
-            }
-            frames.clear();
+            // Compose ZXFont directly over the host-owned game framebuffer.
             ui.clear();
-            drawUi(ui, frames, help, dialog, scenario, palette, use_compact,
+            drawUi(ui, help, dialog, scenario, palette, use_compact,
                    compact_spacing);
-            frames.render(frame.surface());
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

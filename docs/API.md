@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.11)
+# ZXFont Core API (v0.0.12)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -169,3 +169,48 @@ F2 cycles the four palettes; F3 switches embedded ZX Spectrum Unicode 8x8
 against external Compact Airy 6x8; F5 shows glyph diagnostic scenes.
 F4 changes Compact Airy inter-glyph spacing; glyph dimensions remain 6x8.
 The SDL3 adapter preserves aspect ratio when resized or fullscreen.
+
+## Pseudographics (v0.0.12)
+
+ZXFont queues `box()` and `line()` commands in the same `Context` as `text()`
+and `textBox()`. All coordinates and dimensions are **pixels**, not character
+cells. Border glyphs are always rendered with the **embedded Spectrum Unicode
+8x8**; selecting a 6x8 external font or changing letter spacing does not
+move or deform frame geometry.
+
+```cpp
+ui.box(8, 128, 240, 56, zx::Border::Single,
+       zx::ColorIndex{12}, zx::ColorIndex{0}); // Optional filled background.
+ui.line(8, 152, 240, zx::Axis::Horizontal,
+        zx::Border::Single, zx::ColorIndex{12});
+ui.text(24, 136, "КАЯ:", zx::ColorIndex{15});
+ui.textBox(24, 160, 208, "Привет, Димас!", zx::ColorIndex{12});
+```
+
+- `Border::Single` uses `┌─┐│└┘├┤┬┴┼`; `Border::Double` uses `╔═╗║╚╝╠╣╦╩╬`;
+  `Border::Block` uses full `█` cells. The double-vertical drawing mask
+  is corrected from the upstream font: it occupies pixel columns 2 and 4,
+  matching the double corners and junctions instead of shifting by one pixel.
+- `line(x,y,length,Axis::Horizontal/Vertical,style,color)` draws horizontal
+  or vertical segments, and `box(x,y,width,height,style,color,optional_fill)`
+  draws a framed rectangle. Both take either explicit RGBA or `ColorIndex`.
+- Automatic junctions are chosen where 8x8 cell positions and the border
+  style match. For example, a horizontal line spanning the side cells of
+  a single-line box automatically draws `├` and `┤` endpoints. Crossings
+  become `┼` / `╬`. Unlike lines with different styles, matching strokes
+  are resolved together. A shared cell is blended only once at the color
+  of the last contributing primitive.
+- Width and height must be multiples of 8 and at least 16 px. Line lengths
+  must be positive multiples of 8. Invalid sizes, border styles, axes,
+  and color indices throw. Drawing clips against the logical canvas,
+  including boxes with negative origins.
+- Optional filled boxes can be opaque or translucent and are drawn in normal
+  command order, before that box's border. Enqueue text after the box to
+  display it over the fill. Use coordinate offsets (e.g. +8 pixels) for
+  padding; content layout and widget behaviors are intentionally not part
+  of this primitive.
+- Palette-indexed borders and fills are resolved at render time, so F2
+  recolors queued geometry just like indexed text. RGBA geometry is fixed.
+- `clear()` drops text and geometry commands, not the host framebuffer.
+
+SDL3 and any host-owned framebuffer remain outside the ZXFont core.

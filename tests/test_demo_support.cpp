@@ -53,8 +53,9 @@ int main() {
     frame.rect(0, 0, 4, 4, background);
 
     zx::Context ui(64, 48);
-    demo::box(ui, 1, 1, 6, 4, zx::Color{255, 255, 255, 255});
-    demo::box(ui, 1, 1, 6, 4, zx::ColorIndex{10});
+    ui.box(8, 8, 48, 32, zx::Border::Single,
+           zx::Color{255, 255, 255, 255});
+    ui.box(8, 8, 48, 32, zx::Border::Single, zx::ColorIndex{10});
     ui.setPalette(zx::Palette::VGA);
     ui.render(frame.surface());
 

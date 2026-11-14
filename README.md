@@ -4,10 +4,11 @@ ZXFont is a C++20 bitmap-text library intended for retro games, terminals and
 character interfaces. Its core is independent of graphics/window libraries;
 SDL3 is used only by two optional visual test applications.
 
-**Current version: v0.0.11.** This milestone provides a compact `zx::Context`
+**Current version: v0.0.12.** This milestone provides a compact `zx::Context`
 API, embedded ZX Spectrum Unicode 8x8 glyphs, strict UTF-8 decoding, PSF2 Unicode
 font loading, RGBA8 framebuffer rendering and four switchable 16-color
-palettes. GUI widgets are not implemented yet; SDL3 display glue remains demo-only.
+palettes, text measurement/wrapping and box-drawing primitives. GUI widgets are
+not implemented yet; SDL3 display glue remains demo-only.
 
 ## Build and test
 
@@ -30,8 +31,9 @@ Other modes: `./m release`, `./m profile`, `./m rebuild`, `./m clean`.
 
 Both demos are built by `./m` and linked against the same `ZXFont::zxfont`
 static library. Each SDL3 application owns its window, events, and pixel
-buffer. **ZXFont only draws text into the supplied RGBA8 buffer.** The demos
-render ASCII frames with ZXFont until actual box primitives are added.
+buffer. **ZXFont draws text and pseudographic frames into the supplied RGBA8 buffer.**
+The demos use `Context::box()` and `Context::line()` instead of hand-built
+ASCII border strings; F5 also shows a dedicated border gallery.
 
 | Key | Kaya Terminal | Mode256 Simulator |
 | --- | --- | --- |
@@ -59,9 +61,9 @@ To forbid downloading SDL3 when it isn't installed, use
 `-DZXFONT_FETCH_SDL3=OFF`. SDL3 is never linked into the core library.
 F2 cycles Green, Amber, ZX, VGA. F3 switches between the **embedded**
 Spectrum Unicode 8x8 and the **external** Compact Airy 6x8. F5 shows
-font diagnostic scenes in both applications. The PSF2 assets are copied to
-`build/fonts/` when demos or tests are configured. Border glyphs remain on
-an independent 8x8 grid while dialogue text switches to 6x8. Compact
+font diagnostics and border gallery scenes in both applications. The PSF2 assets are copied to
+`build/fonts/` when demos or tests are configured. Box/line glyphs remain on the embedded 8x8 grid while dialogue text switches
+to 6x8. Compact
 text uses 1 px extra space by default; F4 cycles through 0, 1, 2 px when
 Compact is selected. Spectrum 8x8 retains its original 0 px spacing.
 If the compact file cannot be opened or validated, the demo keeps the built-in
@@ -170,3 +172,26 @@ Every patch increments the final version component by one and updates
 `Context::textBox(x, y, max_width, text, color)` queues word-wrapped UTF-8.
 The active font dimensions and letter spacing determine both measurements and wraps.
 See `docs/API.md` for behavior and limits.
+
+### Pseudographic borders (v0.0.12)
+
+The `Context` exposes only two new drawing operations:
+
+```cpp
+ui.box(8, 128, 240, 56, zx::Border::Single,
+       zx::ColorIndex{12}, zx::ColorIndex{0});
+ui.line(8, 152, 240, zx::Axis::Horizontal,
+        zx::Border::Single, zx::ColorIndex{12});
+ui.textBox(24, 160, 208, "Привет, Кая!", zx::ColorIndex{15});
+```
+
+Borders use the **8x8 Spectrum Unicode box glyphs**, with a corrected
+double-vertical bitmap to align corner and junction strokes, even when the
+current font is Compact Airy 6x8. Supported styles: `Single`, `Double`,
+`Block`. Aligned lines automatically join matching borders or other lines;
+indexed border and fill colors respond to F2. Box dimensions must be multiples
+of 8 and at least 16 pixels, line lengths positive multiples of 8. Pixel
+positions may be arbitrary, but to join, the 8x8 cell origins must coincide.
+A filled box covers its complete rectangle; queue text after the box to draw
+inside it. Text insets/padding remain the caller's responsibility, not a
+new widget system. See [API details](docs/API.md).

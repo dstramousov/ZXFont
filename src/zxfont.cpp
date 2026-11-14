@@ -3,7 +3,11 @@
 #include "utf8.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
+#include <unordered_map>
+#include <variant>
+#include <functional>
 #include <stdexcept>
 #include <utility>
 
@@ -205,6 +209,191 @@ LayoutResult layoutText(const std::u32string& input, const Font& font,
     return result;
 }
 
+// Box drawing uses the embedded font's glyphs on a fixed 8x8 grid.
+constexpr std::int64_t kBorderCell = 8;
+constexpr std::uint8_t kUp = 1;
+constexpr std::uint8_t kRight = 2;
+constexpr std::uint8_t kDown = 4;
+constexpr std::uint8_t kLeft = 8;
+
+void validateBorder(Border border) {
+    switch (border) {
+        case Border::Single:
+        case Border::Double:
+        case Border::Block: return;
+    }
+    throw std::invalid_argument("Unknown border style");
+}
+
+void validateAxis(Axis axis) {
+    switch (axis) {
+        case Axis::Horizontal:
+        case Axis::Vertical: return;
+    }
+    throw std::invalid_argument("Unknown line axis");
+}
+
+// Signed floor division and ceil division by a positive divisor.
+std::int64_t floorDiv(std::int64_t value, std::int64_t divisor) noexcept {
+    const auto quotient = value / divisor;
+    return quotient - (value % divisor < 0 ? 1 : 0);
+}
+
+struct VisibleCells {
+    std::int64_t first;
+    std::int64_t last;
+};
+
+VisibleCells visibleCells(std::int64_t origin, std::uint32_t count,
+                          std::uint32_t limit) noexcept {
+    // A cell intersects the canvas when its last pixel is >= 0 and
+    // its first pixel is < limit, including partially clipped cells.
+    const auto first = std::max<std::int64_t>(
+        0, -floorDiv(7 + origin, kBorderCell));
+    const auto last = std::min<std::int64_t>(
+        static_cast<std::int64_t>(count) - 1,
+        floorDiv(static_cast<std::int64_t>(limit) - 1 - origin, kBorderCell));
+    return {first, last};
+}
+
+template <typename Callback>
+void eachBoxCell(std::int64_t x, std::int64_t y,
+                 std::uint32_t width, std::uint32_t height,
+                 std::uint32_t canvas_width, std::uint32_t canvas_height,
+                 Callback&& callback) {
+    const auto columns = static_cast<std::int64_t>(width) / kBorderCell;
+    const auto rows = static_cast<std::int64_t>(height) / kBorderCell;
+    const auto visible_x = visibleCells(x, static_cast<std::uint32_t>(columns),
+                                         canvas_width);
+    const auto visible_y = visibleCells(y, static_cast<std::uint32_t>(rows),
+                                         canvas_height);
+    if (visible_x.first > visible_x.last || visible_y.first > visible_y.last) {
+        return;
+    }
+    for (auto row = visible_y.first; row <= visible_y.last; ++row) {
+        if (row != 0 && row != rows - 1) {
+            // Interior rows can only contain the two vertical sides.
+            if (visible_x.first == 0) {
+                callback(x, y + row * kBorderCell, kUp | kDown);
+            }
+            if (visible_x.first <= columns - 1 &&
+                visible_x.last >= columns - 1) {
+                callback(x + (columns - 1) * kBorderCell,
+                         y + row * kBorderCell, kUp | kDown);
+            }
+            continue;
+        }
+        for (auto col = visible_x.first; col <= visible_x.last; ++col) {
+            std::uint8_t mask = 0;
+            mask |= col == 0 ? kRight : col == columns - 1 ? kLeft
+                            : kLeft | kRight;
+            if (col == 0 || col == columns - 1) {
+                mask |= row == 0 ? kDown : kUp;
+            }
+            callback(x + col * kBorderCell, y + row * kBorderCell, mask);
+        }
+    }
+}
+
+template <typename Callback>
+void eachLineCell(std::int64_t x, std::int64_t y,
+                  std::uint32_t length, Axis axis,
+                  std::uint32_t canvas_width, std::uint32_t canvas_height,
+                  Callback&& callback) {
+    const auto count = length / kBorderCell;
+    if (axis == Axis::Horizontal) {
+        if (y + 7 < 0 || y >= canvas_height) return;
+        const auto visible = visibleCells(x, count, canvas_width);
+        for (auto i = visible.first; i <= visible.last; ++i) {
+            callback(x + i * kBorderCell, y, i,
+                     static_cast<std::int64_t>(count));
+        }
+    } else {
+        if (x + 7 < 0 || x >= canvas_width) return;
+        const auto visible = visibleCells(y, count, canvas_height);
+        for (auto i = visible.first; i <= visible.last; ++i) {
+            callback(x, y + i * kBorderCell, i,
+                     static_cast<std::int64_t>(count));
+        }
+    }
+}
+
+struct StrokeKey {
+    std::int64_t x;
+    std::int64_t y;
+    Border border;
+    bool operator==(const StrokeKey&) const = default;
+};
+
+struct StrokeHash {
+    std::size_t operator()(const StrokeKey& key) const noexcept {
+        std::size_t h = std::hash<std::int64_t>{}(key.x);
+        h ^= std::hash<std::int64_t>{}(key.y) + 0x9e3779b9u + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(static_cast<int>(key.border)) + 0x9e3779b9u +
+             (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+struct StrokeCell {
+    std::uint8_t mask = 0;
+    std::size_t owner = 0;
+};
+using Strokes = std::unordered_map<StrokeKey, StrokeCell, StrokeHash>;
+
+void addStroke(Strokes& strokes, std::int64_t x, std::int64_t y,
+               Border border, std::uint8_t mask, std::size_t owner) {
+    auto& cell = strokes[{x, y, border}];
+    cell.mask |= mask;
+    cell.owner = std::max(cell.owner, owner);
+}
+
+// The source font's U+2551 uses columns 3 and 5, while its double
+// corners, tees and crosses use columns 2 and 4. A frame assembled from
+// those glyphs therefore shifts by one pixel at every vertical join.
+// Keep this corrected border-only mask independent of the text glyph.
+constexpr std::array<std::uint8_t, 8> kAlignedDoubleVertical = {
+    0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28, 0x28
+};
+
+char32_t borderGlyph(Border border, std::uint8_t mask) noexcept {
+    if (border == Border::Block) return U'█';
+    const bool dbl = border == Border::Double;
+    switch (mask) {
+        case kUp | kRight: return dbl ? U'╚' : U'└';
+        case kUp | kLeft: return dbl ? U'╝' : U'┘';
+        case kDown | kRight: return dbl ? U'╔' : U'┌';
+        case kDown | kLeft: return dbl ? U'╗' : U'┐';
+        case kLeft | kRight: return dbl ? U'═' : U'─';
+        case kUp | kDown: return dbl ? U'║' : U'│';
+        case kUp | kLeft | kRight: return dbl ? U'╩' : U'┴';
+        case kDown | kLeft | kRight: return dbl ? U'╦' : U'┬';
+        case kUp | kDown | kRight: return dbl ? U'╠' : U'├';
+        case kUp | kDown | kLeft: return dbl ? U'╣' : U'┤';
+        case kUp | kDown | kLeft | kRight: return dbl ? U'╬' : U'┼';
+        default: return (mask & (kLeft | kRight)) != 0
+                            ? (dbl ? U'═' : U'─') : (dbl ? U'║' : U'│');
+    }
+}
+
+void fillRectangle(Surface target, std::uint32_t canvas_width,
+                   std::uint32_t canvas_height, std::int64_t x, std::int64_t y,
+                   std::uint32_t width, std::uint32_t height,
+                   Color color) noexcept {
+    if (color.a == 0) return;
+    const auto left = std::max<std::int64_t>(0, x);
+    const auto top = std::max<std::int64_t>(0, y);
+    const auto right = std::min<std::int64_t>(canvas_width, x + width);
+    const auto bottom = std::min<std::int64_t>(canvas_height, y + height);
+    for (auto py = top; py < bottom; ++py) {
+        for (auto px = left; px < right; ++px) {
+            const auto offset = static_cast<std::size_t>(py) * target.stride_bytes +
+                                static_cast<std::size_t>(px) * kChannelsPerPixel;
+            blendPixel(target.pixels.data() + offset, color);
+        }
+    }
+}
+
 }  // namespace
 
 Context::Context(std::uint32_t width, std::uint32_t height)
@@ -296,34 +485,160 @@ void Context::appendBox(int x, int y, std::uint32_t max_width,
                                     font_, letter_spacing_, indexed, index});
 }
 
+void Context::box(int x, int y, std::uint32_t width, std::uint32_t height,
+                  Border border, Color color, std::optional<Color> fill) {
+    validateBorder(border);
+    if (width < 16 || height < 16 || width % 8 != 0 || height % 8 != 0) {
+        throw std::invalid_argument("Box size must be >=16 and divisible by 8");
+    }
+    commands_.emplace_back(BoxCommand{x, y, width, height, border, color,
+                                      fill, false, {0}, std::nullopt});
+}
+
+void Context::box(int x, int y, std::uint32_t width, std::uint32_t height,
+                  Border border, ColorIndex color,
+                  std::optional<ColorIndex> fill) {
+    validateBorder(border);
+    (void)paletteColor(palette_, color);
+    if (fill) (void)paletteColor(palette_, *fill);
+    if (width < 16 || height < 16 || width % 8 != 0 || height % 8 != 0) {
+        throw std::invalid_argument("Box size must be >=16 and divisible by 8");
+    }
+    commands_.emplace_back(BoxCommand{x, y, width, height, border, {},
+                                      std::nullopt, true, color, fill});
+}
+
+void Context::line(int x, int y, std::uint32_t length, Axis axis,
+                   Border border, Color color) {
+    validateBorder(border);
+    validateAxis(axis);
+    if (length < 8 || length % 8 != 0) {
+        throw std::invalid_argument("Line length must be positive and divisible by 8");
+    }
+    commands_.emplace_back(LineCommand{x, y, length, axis, border, color,
+                                       false, {0}});
+}
+
+void Context::line(int x, int y, std::uint32_t length, Axis axis,
+                   Border border, ColorIndex color) {
+    validateBorder(border);
+    validateAxis(axis);
+    (void)paletteColor(palette_, color);
+    if (length < 8 || length % 8 != 0) {
+        throw std::invalid_argument("Line length must be positive and divisible by 8");
+    }
+    commands_.emplace_back(LineCommand{x, y, length, axis, border, {},
+                                       true, color});
+}
+
 void Context::clear() noexcept { commands_.clear(); }
 
 void Context::render(Surface target) const {
     validateSurface(target, width_, height_);
-    for (const auto& command : commands_) {
-        std::int64_t x = command.x;
-        std::int64_t y = command.y;
-        const auto color = command.indexed ? paletteColor(palette_, command.index)
-                                           : command.color;
-        const auto glyph_width = command.font.glyphWidth();
-        const auto glyph_height = command.font.glyphHeight();
-        for (std::size_t i = 0; i < command.value.size(); ++i) {
-            const auto codepoint = command.value[i];
-            if (codepoint == U'\n') {
-                x = command.x;
-                advance(y, glyph_height);
-                continue;
+
+    // Collect connections once per render, independently of text fonts.
+    // First add boxes, so line endpoints can join their vertical/horizontal
+    // sides as tees rather than continuing outside the border.
+    Strokes strokes;
+    for (std::size_t index = 0; index < commands_.size(); ++index) {
+        const auto& command = commands_[index];
+        if (const auto* box = std::get_if<BoxCommand>(&command)) {
+            eachBoxCell(box->x, box->y, box->width, box->height,
+                        width_, height_, [&](auto x, auto y, auto mask) {
+                            addStroke(strokes, x, y, box->border, mask, index);
+                        });
+        }
+    }
+    for (std::size_t index = 0; index < commands_.size(); ++index) {
+        const auto& command = commands_[index];
+        if (const auto* line = std::get_if<LineCommand>(&command)) {
+            eachLineCell(line->x, line->y, line->length, line->axis,
+                         width_, height_, [&](auto x, auto y, auto cell_index, auto count) {
+                std::uint8_t mask = line->axis == Axis::Horizontal
+                                        ? kLeft | kRight : kUp | kDown;
+                if (count > 1) {
+                    const auto found = strokes.find({x, y, line->border});
+                    const auto existing = found == strokes.end()
+                                              ? std::uint8_t{0} : found->second.mask;
+                    if (line->axis == Axis::Horizontal &&
+                        (existing & (kUp | kDown)) != 0) {
+                        if (cell_index == 0) mask = kRight;
+                        if (cell_index == count - 1) mask = kLeft;
+                    } else if (line->axis == Axis::Vertical &&
+                               (existing & (kLeft | kRight)) != 0) {
+                        if (cell_index == 0) mask = kDown;
+                        if (cell_index == count - 1) mask = kUp;
+                    }
+                }
+                addStroke(strokes, x, y, line->border, mask, index);
+            });
+        }
+    }
+
+    const Font graphic_font;  // Embedded 8x8 Spectrum Unicode.
+    auto drawStroke = [&](std::int64_t x, std::int64_t y, Border border,
+                          Color color, std::size_t index) {
+        const auto it = strokes.find({x, y, border});
+        // The last contributing primitive paints the joined glyph once.
+        // This avoids applying semi-transparent stroke alpha multiple times.
+        if (it == strokes.end() || it->second.owner != index) return;
+        const auto* glyph = border == Border::Double &&
+                                    it->second.mask == (kUp | kDown)
+                                ? kAlignedDoubleVertical.data()
+                                : graphic_font.bitmap(borderGlyph(border, it->second.mask));
+        drawGlyph(target, width_, height_, x, y, glyph, 8, 8,
+                  graphic_font.bytesPerRow(), color);
+    };
+
+    for (std::size_t index = 0; index < commands_.size(); ++index) {
+        const auto& command = commands_[index];
+        if (const auto* box = std::get_if<BoxCommand>(&command)) {
+            if (box->indexed ? box->fill_index.has_value()
+                             : box->fill.has_value()) {
+                const auto fill = box->indexed
+                                      ? paletteColor(palette_, *box->fill_index)
+                                      : *box->fill;
+                fillRectangle(target, width_, height_, box->x, box->y,
+                              box->width, box->height, fill);
             }
-            // Compare without addition to keep saturated positions safe.
-            if (x < width_ && x > -static_cast<std::int64_t>(glyph_width) &&
-                y < height_ && y > -static_cast<std::int64_t>(glyph_height)) {
-                drawGlyph(target, width_, height_, x, y,
-                          command.font.bitmap(codepoint), glyph_width,
-                          glyph_height, command.font.bytesPerRow(), color);
-            }
-            advance(x, glyph_width);
-            if (i + 1 < command.value.size() && command.value[i + 1] != U'\n') {
-                advance(x, command.letter_spacing);
+            const auto color = box->indexed ? paletteColor(palette_, box->index)
+                                            : box->color;
+            eachBoxCell(box->x, box->y, box->width, box->height,
+                        width_, height_, [&](auto x, auto y, auto) {
+                            drawStroke(x, y, box->border, color, index);
+                        });
+        } else if (const auto* line = std::get_if<LineCommand>(&command)) {
+            const auto color = line->indexed ? paletteColor(palette_, line->index)
+                                             : line->color;
+            eachLineCell(line->x, line->y, line->length, line->axis,
+                         width_, height_, [&](auto x, auto y, auto, auto) {
+                drawStroke(x, y, line->border, color, index);
+            });
+        } else {
+            const auto& text = std::get<TextCommand>(command);
+            std::int64_t x = text.x;
+            std::int64_t y = text.y;
+            const auto color = text.indexed ? paletteColor(palette_, text.index)
+                                            : text.color;
+            const auto glyph_width = text.font.glyphWidth();
+            const auto glyph_height = text.font.glyphHeight();
+            for (std::size_t i = 0; i < text.value.size(); ++i) {
+                const auto codepoint = text.value[i];
+                if (codepoint == U'\n') {
+                    x = text.x;
+                    advance(y, glyph_height);
+                    continue;
+                }
+                if (x < width_ && x > -static_cast<std::int64_t>(glyph_width) &&
+                    y < height_ && y > -static_cast<std::int64_t>(glyph_height)) {
+                    drawGlyph(target, width_, height_, x, y,
+                              text.font.bitmap(codepoint), glyph_width,
+                              glyph_height, text.font.bytesPerRow(), color);
+                }
+                advance(x, glyph_width);
+                if (i + 1 < text.value.size() && text.value[i + 1] != U'\n') {
+                    advance(x, text.letter_spacing);
+                }
             }
         }
     }

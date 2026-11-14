@@ -1,6 +1,7 @@
 #include "zxfont/zxfont.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -559,6 +560,164 @@ void testTextLayout() {
     require(throws<std::invalid_argument>([&] { (void)ui.measureText("A", 5); }));
 }
 
+void testPseudographics() {
+    constexpr std::size_t width = 80;
+    constexpr std::size_t height = 56;
+    auto render = [](const zx::Context& ui) {
+        std::array<std::uint8_t, width * height * 4> pixels{};
+        ui.render({pixels, width, height, width * 4});
+        return pixels;
+    };
+
+    // Intersections are chosen automatically for both orientations, even
+    // when lines are submitted before their surrounding box.
+    zx::Context single(width, height);
+    single.line(24, 8, 32, zx::Axis::Vertical, zx::Border::Single);
+    single.line(8, 16, 40, zx::Axis::Horizontal, zx::Border::Single);
+    single.box(8, 8, 40, 32, zx::Border::Single);
+    zx::Context manual(width, height);
+    manual.text(8, 8, "┌─┬─┐\n├─┼─┤\n│ │ │\n└─┴─┘");
+    require(render(single) == render(manual));
+
+    zx::Context dbl(width, height);
+    dbl.box(8, 8, 40, 32, zx::Border::Double);
+    dbl.line(8, 16, 40, zx::Axis::Horizontal, zx::Border::Double);
+    dbl.line(24, 8, 32, zx::Axis::Vertical, zx::Border::Double);
+    // Double borders must not inherit the upstream U+2551 one-pixel shift.
+    // Top/bottom corners and all junctions use vertical columns 2 and 4.
+    // The middle straight segments must occupy exactly the same columns.
+    const auto double_pixels = render(dbl);
+    auto ink = [&](std::size_t x, std::size_t y) {
+        return double_pixels[offset(x, y, width * 4) + 3] != 0;
+    };
+    // Straight vertical cells have exactly two aligned columns.
+    for (std::size_t y = 24; y < 32; ++y) {
+        require(ink(10, y) && ink(12, y));
+        require(ink(42, y) && ink(44, y));
+        require(!ink(11, y) && !ink(13, y));
+        require(!ink(43, y) && !ink(45, y));
+    }
+    // Both rails continue across cell seams into corners and junctions.
+    for (std::size_t y : {15U, 16U, 23U, 24U, 31U, 32U}) {
+        require(ink(10, y) && ink(12, y));
+        require(ink(42, y) && ink(44, y));
+    }
+    // An interior vertical stroke stays aligned through a top T,
+    // an intersection and a bottom T (including all cell seams).
+    for (std::size_t y : {15U, 16U, 23U, 24U, 31U, 32U}) {
+        require(ink(26, y) && ink(28, y));
+        require(!ink(27, y) && !ink(29, y));
+    }
+    // The two horizontal channels tile through junction cells.
+    for (std::size_t x : {15U, 16U, 23U, 24U, 31U, 32U, 39U, 40U}) {
+        require(ink(x, 10) && ink(x, 12));
+    }
+    // No double-border pixels may leak into an untouched interior cell.
+    for (std::size_t y = 25; y < 32; ++y) {
+        for (std::size_t x = 17; x < 24; ++x) {
+            require(!ink(x, y));
+        }
+    }
+    // Drawing the same box using the compact font changes no geometry.
+    zx::Context compact_double(width, height);
+    compact_double.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    compact_double.setLetterSpacing(2);
+    compact_double.box(8, 8, 40, 32, zx::Border::Double);
+    compact_double.line(8, 16, 40, zx::Axis::Horizontal, zx::Border::Double);
+    compact_double.line(24, 8, 32, zx::Axis::Vertical, zx::Border::Double);
+    require(render(compact_double) == double_pixels);
+
+    zx::Context block(width, height);
+    block.box(8, 8, 24, 24, zx::Border::Block);
+    zx::Context expected_block(width, height);
+    expected_block.text(8, 8, "███\n█ █\n███");
+    require(render(block) == render(expected_block));
+
+    // Frame glyphs always use the built-in 8x8 font, even when external
+    // 6x8 text is active with nonzero letter spacing.
+    zx::Context compact(width, height);
+    compact.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    compact.setLetterSpacing(2);
+    compact.box(8, 8, 40, 32, zx::Border::Single);
+    compact.line(8, 16, 40, zx::Axis::Horizontal, zx::Border::Single);
+    zx::Context classic(width, height);
+    classic.box(8, 8, 40, 32, zx::Border::Single);
+    classic.line(8, 16, 40, zx::Axis::Horizontal, zx::Border::Single);
+    require(render(compact) == render(classic));
+
+    // Indexed border and fill are resolved at render time; RGB colors are not.
+    zx::Context recolor(width, height);
+    recolor.box(8, 8, 40, 32, zx::Border::Single,
+                zx::ColorIndex{10}, zx::ColorIndex{1});
+    recolor.text(16, 16, "A", zx::Color{130, 90, 20, 255});
+    auto sample = [&](zx::Palette palette) {
+        recolor.setPalette(palette);
+        const auto pixels = render(recolor);
+        const auto stroke = zx::paletteColor(palette, zx::ColorIndex{10});
+        const auto fill = zx::paletteColor(palette, zx::ColorIndex{1});
+        const auto p_stroke = offset(18, 11, width * 4); // top border
+        const auto p_fill = offset(36, 24, width * 4); // internal background
+        const auto p_text = offset(18, 17, width * 4); // A's top row
+        require(pixels[p_stroke] == stroke.r &&
+                pixels[p_stroke + 1] == stroke.g &&
+                pixels[p_stroke + 2] == stroke.b);
+        require(pixels[p_fill] == fill.r &&
+                pixels[p_fill + 1] == fill.g &&
+                pixels[p_fill + 2] == fill.b);
+        require(pixels[p_text] == 130 && pixels[p_text + 1] == 90 &&
+                pixels[p_text + 2] == 20);
+    };
+    sample(zx::Palette::MonoGreen);
+    sample(zx::Palette::VGA);
+
+    // Two crossing translucent strokes must paint a shared glyph only once.
+    zx::Context translucent(width, height);
+    translucent.line(24, 8, 32, zx::Axis::Vertical, zx::Border::Single,
+                     zx::Color{200, 10, 10, 128});
+    translucent.line(8, 16, 40, zx::Axis::Horizontal, zx::Border::Single,
+                     zx::Color{200, 10, 10, 128});
+    const auto transparent_pixels = render(translucent);
+    require(transparent_pixels[offset(27, 19, width * 4) + 3] == 128);
+
+    require(throws<std::invalid_argument>([&] {
+        single.box(0, 0, 8, 16);
+    }));
+    require(throws<std::invalid_argument>([&] {
+        single.box(0, 0, 24, 9);
+    }));
+    require(throws<std::invalid_argument>([&] {
+        single.line(0, 0, 0, zx::Axis::Horizontal);
+    }));
+    require(throws<std::invalid_argument>([&] {
+        single.line(0, 0, 9, zx::Axis::Horizontal);
+    }));
+    require(throws<std::invalid_argument>([&] {
+        single.line(0, 0, 16, static_cast<zx::Axis>(255));
+    }));
+    require(throws<std::invalid_argument>([&] {
+        single.box(0, 0, 16, 16, static_cast<zx::Border>(255));
+    }));
+    require(throws<std::out_of_range>([&] {
+        single.box(0, 0, 16, 16, zx::Border::Single,
+                   zx::ColorIndex{16});
+    }));
+    require(throws<std::out_of_range>([&] {
+        single.box(0, 0, 16, 16, zx::Border::Single,
+                   zx::ColorIndex{1}, zx::ColorIndex{16});
+    }));
+
+    // Large or off-screen primitives must be clipped without unbounded loops.
+    zx::Context clipped(width, height);
+    clipped.box(-16, -16, 40, 40, zx::Border::Single);
+    clipped.line(-100000, 16, 1000016, zx::Axis::Horizontal,
+                 zx::Border::Single);
+    const auto output = render(clipped);
+    require(output.size() == width * height * 4);
+    clipped.clear();
+    const auto empty = render(clipped);
+    require(std::all_of(empty.begin(), empty.end(), [](auto b) { return b == 0; }));
+}
+
 }  // namespace
 
 int main() {
@@ -572,4 +731,5 @@ int main() {
     testCompactFontAndFallback();
     testLetterSpacing();
     testTextLayout();
+    testPseudographics();
 }
