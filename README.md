@@ -81,6 +81,11 @@ ui.render({pixels, 256, 192, 256 * 4});
 | `line(x, y, length, axis, border, color)` | Провести линию; совместимые стыки с рамками соединяются автоматически. |
 | `panel(x, y, w, h, title, options, borderColor, titleColor, fill)` | Нарисовать панель и заголовок, вернуть свободную область `PanelArea`. |
 | `panelText(area, text, color, align)` | Перенести, выровнять и обрезать текст внутри области панели. |
+| `TextViewport::configure(reveal, area)` | Настроить видимую область для уже подготовленного текста без повторного переноса строк. |
+| `TextViewport::scrollLines(n)` | Прокрутить на `n` строк (отрицательное число — вверх). |
+| `TextViewport::pageUp()`, `pageDown()` | Прокрутить на одну страницу. |
+| `TextViewport::home()`, `end(reveal)` | Перейти к началу / последней напечатанной строке. |
+| `TextViewport::follow(reveal)` | Автоматически удерживать курсор печати в видимой области. |
 | `clear()` | Очистить очередь команд, **не пиксели**. |
 | `render(Surface)` | Нарисовать команды в предоставленный RGBA8-буфер. |
 
@@ -105,7 +110,7 @@ ui.panelText(area, "Привет. Как прошёл день?", zx::ColorIndex
              zx::TextAlign::Left);
 ```
 
-Варианты `TextAlign`: `Left`, `Center`, `Right`. Заголовок занимает одну строку. Текст и курсор, выведенные в `PanelArea`, обрезаются по её границам. Панель **не прокручивается**: прокрутку добавим отдельно, когда понадобится.
+Варианты `TextAlign`: `Left`, `Center`, `Right`. Заголовок занимает одну строку. Текст и курсор, выведенные в `PanelArea`, обрезаются по её границам. Сама `PanelArea` задаёт только границы. Прокрутка включается отдельно через `TextViewport`.
 
 ### Печатная машинка и курсор
 
@@ -119,6 +124,34 @@ ui.panelText(area, "Привет. Как прошёл день?", zx::ColorIndex
 | `setOptions(options)`, `options()` | Изменить/прочитать настройки без сброса прогресса. |
 | `finish()`, `reset()`, `finished()` | Допечатать сразу, начать заново, проверить завершение. |
 | `visibleCharacters()`, `metrics()` | Узнать прогресс и размеры полного текста. |
+| `caretLine()`, `lineHeight()` | Узнать строку текущей позиции печати и высоту строки. |
+| `draw(context, TextViewport, color)` | Вывести только строки внутри прокручиваемой области. |
+
+Для длинных сообщений используется `TextViewport`: он хранит положение прокрутки,
+а `TextReveal` хранит предварительно рассчитанные строки. Даже при перелистывании
+сотен страниц переносы не пересчитываются. Рисуются только строки видимой области.
+
+```cpp
+zx::TextReveal reply;
+reply.setText(ui, longAnswer, area.width);
+zx::TextViewport viewport;
+viewport.configure(reply, area);
+
+// В цикле приложения:
+reply.update(deltaSeconds);
+viewport.follow(reply);             // Не двигает экран после ручной прокрутки.
+reply.draw(ui, viewport, zx::ColorIndex{12});
+
+// Обработка клавиш:
+viewport.pageUp();                 // При реальной прокрутке автоследование выключается.
+viewport.end(reply);              // Вернуться к последней букве и продолжить слежение.
+```
+
+После смены шрифта или ширины текста вызови `setText()` и `configure()` заново,
+поскольку изменится разбивка на строки. `reset()` возвращает прокрутку к началу
+и включает автоследование. `firstLine()`, `pageLines()` и `autoFollow()`
+позволяют показать положение и режим прокрутки. Обычные `text()` и `textBox()`
+по-прежнему работают без `TextViewport`.
 
 `RevealOptions` задаёт `charsPerSecond` (30 по умолчанию, **0 — мгновенно**), `cursorEnabled`, `cursorGapPx`, `cursorLead` (доля интервала перед буквой), `cursorBlink`, `cursorAfterComplete`, `cursorColor`. Состояние каждого `TextReveal` независимо от других.
 

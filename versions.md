@@ -108,3 +108,11 @@
 - Rework the Kaya dialogue into history and live-response panels and use panel layout in Mode256.
 - Replace the root README with a concise Russian overview, screenshot placeholders, integration guide and public API reference; keep version history only here.
 - Add panel geometry, alignment, clipping, palette and validation tests.
+
+## v0.0.14 -> v0.0.15
+
+- Add `TextViewport` with per-instance line/page scrolling, Home/End, and automatic follow of the current reveal position.
+- Render only pre-laid-out visible rows; keep the wrapping and font snapshot fixed while scrolling.
+- Suspend auto-follow on manual navigation and resume it with End; keep the animated cursor clipped to its viewport.
+- Add independent history/reply navigation in Kaya (Tab switches the active panel) and page scrolling for Mode256 dialogue without changing movement controls.
+- Extend pixel tests, long-history tests, the README API reference, and detailed API documentation.

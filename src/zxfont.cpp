@@ -816,6 +816,98 @@ TextReveal::TextReveal(RevealOptions options) : options_(options) {
     validateRevealOptions(options_);
 }
 
+void TextViewport::configure(const TextReveal& text, PanelArea area) {
+    if (text.max_width_ == 0 || area.width != text.max_width_ ||
+        area.height == 0) {
+        throw std::invalid_argument("Viewport must match the prepared text width and have a height");
+    }
+    const auto line_height = text.lineHeight();
+    if (line_height == 0) {
+        throw std::invalid_argument("Viewport font has no line height");
+    }
+    area_ = area;
+    line_height_ = line_height;
+    total_lines_ = text.metrics_.lines + (text.terminalCaretWraps() ? 1u : 0u);
+    revealed_lines_ = total_lines_ == 0 ? 0 :
+        std::min(total_lines_, text.caretLine() + 1);
+    page_lines_ = std::max<std::size_t>(1, area.height / line_height);
+    first_line_ = std::min(first_line_, maxFirstLine());
+}
+
+void TextViewport::reset() noexcept {
+    first_line_ = 0;
+    auto_follow_ = true;
+}
+
+std::size_t TextViewport::maxFirstLine() const noexcept {
+    return revealed_lines_ > page_lines_ ? revealed_lines_ - page_lines_ : 0;
+}
+
+void TextViewport::scrollLines(std::int64_t delta) noexcept {
+    if (delta == 0) return;
+    const auto previous = first_line_;
+    if (delta < 0) {
+        // Negating INT64_MIN directly would overflow.
+        const auto amount = static_cast<std::uint64_t>(-(delta + 1)) + 1;
+        first_line_ -= static_cast<std::size_t>(
+            std::min<std::uint64_t>(amount, first_line_));
+    } else {
+        const auto available = maxFirstLine() - first_line_;
+        first_line_ += static_cast<std::size_t>(
+            std::min<std::uint64_t>(static_cast<std::uint64_t>(delta), available));
+    }
+    if (first_line_ != previous) auto_follow_ = false;
+}
+
+void TextViewport::pageUp() noexcept {
+    const auto amount = static_cast<std::int64_t>(
+        std::min<std::size_t>(page_lines_, std::numeric_limits<std::int64_t>::max()));
+    scrollLines(-amount);
+}
+
+void TextViewport::pageDown() noexcept {
+    const auto amount = static_cast<std::int64_t>(
+        std::min<std::size_t>(page_lines_, std::numeric_limits<std::int64_t>::max()));
+    scrollLines(amount);
+}
+
+void TextViewport::home() noexcept {
+    first_line_ = 0;
+    auto_follow_ = false;
+}
+
+void TextViewport::positionAt(std::size_t line) noexcept {
+    if (total_lines_ == 0) {
+        first_line_ = 0;
+        return;
+    }
+    line = std::min(line, total_lines_ - 1);
+    const auto wanted = line >= page_lines_ ? line - (page_lines_ - 1) : 0;
+    first_line_ = std::min(wanted, maxFirstLine());
+}
+
+void TextViewport::end(const TextReveal& text) noexcept {
+    revealed_lines_ = total_lines_ == 0 ? 0 :
+        std::min(total_lines_, text.caretLine() + 1);
+    auto_follow_ = true;
+    positionAt(text.caretLine());
+}
+
+void TextViewport::follow(const TextReveal& text) noexcept {
+    revealed_lines_ = total_lines_ == 0 ? 0 :
+        std::min(total_lines_, text.caretLine() + 1);
+    first_line_ = std::min(first_line_, maxFirstLine());
+    if (!auto_follow_) return;
+    const auto caret = text.caretLine();
+    if (caret < first_line_ || caret - first_line_ >= page_lines_) {
+        positionAt(caret);
+    }
+}
+
+std::size_t TextViewport::firstLine() const noexcept { return first_line_; }
+std::size_t TextViewport::pageLines() const noexcept { return page_lines_; }
+bool TextViewport::autoFollow() const noexcept { return auto_follow_; }
+
 void TextReveal::setText(const Context& context, std::string_view value,
                          std::uint32_t max_width) {
     if (max_width == 0) {
@@ -844,8 +936,24 @@ void TextReveal::setText(const Context& context, std::string_view value,
     }
     positions.emplace_back(px, py);
 
+    // Cache line offsets once; viewport rendering never scans earlier pages.
+    std::vector<LaidOutLine> lines;
+    lines.reserve(layout.metrics.lines);
+    if (!layout.text.empty()) {
+        std::size_t begin = 0;
+        std::size_t first_character = 0;
+        for (std::size_t i = 0; i <= layout.text.size(); ++i) {
+            if (i == layout.text.size() || layout.text[i] == U'\n') {
+                lines.push_back(LaidOutLine{begin, i - begin, first_character});
+                first_character += i - begin;
+                begin = i + 1;
+            }
+        }
+    }
+
     // Commit only after complete validation and allocation succeeded.
     laid_out_ = std::move(layout.text);
+    lines_ = std::move(lines);
     metrics_ = layout.metrics;
     positions_ = std::move(positions);
     font_ = context.font_;
@@ -908,6 +1016,24 @@ bool TextReveal::finished() const noexcept {
 std::size_t TextReveal::visibleCharacters() const noexcept { return visible_; }
 TextMetrics TextReveal::metrics() const noexcept { return metrics_; }
 
+std::uint32_t TextReveal::lineHeight() const noexcept {
+    return font_.glyphHeight();
+}
+
+bool TextReveal::terminalCaretWraps() const noexcept {
+    return !positions_.empty() && metrics_.lines > 0 &&
+           positions_.back().first != 0 &&
+           positions_.back().first + font_.glyphWidth() > max_width_;
+}
+
+std::size_t TextReveal::caretLine() const noexcept {
+    if (positions_.empty() || metrics_.lines == 0) return 0;
+    const auto y = positions_[visible_].second;
+    const auto row = static_cast<std::size_t>(y / font_.glyphHeight());
+    if (finished() && terminalCaretWraps()) return metrics_.lines;
+    return std::min(row, metrics_.lines - 1);
+}
+
 void TextReveal::draw(Context& context, int x, int y, Color color) const {
     queue(context, x, y, color, false, ColorIndex{0});
 }
@@ -924,6 +1050,79 @@ void TextReveal::draw(Context& context, PanelArea area, Color color) const {
 void TextReveal::draw(Context& context, PanelArea area, ColorIndex color) const {
     (void)paletteColor(context.palette_, color);
     queue(context, area.x, area.y, Color{}, true, color, area);
+}
+
+void TextReveal::draw(Context& context, const TextViewport& viewport,
+                      Color color) const {
+    queueViewport(context, viewport, color, false, ColorIndex{0});
+}
+
+void TextReveal::draw(Context& context, const TextViewport& viewport,
+                      ColorIndex color) const {
+    (void)paletteColor(context.palette_, color);
+    queueViewport(context, viewport, Color{}, true, color);
+}
+
+void TextReveal::queueViewport(Context& context, const TextViewport& viewport,
+                               Color color, bool indexed, ColorIndex index) const {
+    if (viewport.line_height_ != font_.glyphHeight() ||
+        viewport.area_.width != max_width_ ||
+        viewport.total_lines_ != metrics_.lines + (terminalCaretWraps() ? 1u : 0u) ||
+        viewport.area_.height == 0) {
+        throw std::invalid_argument("Viewport is not configured for this text layout");
+    }
+    if (lines_.empty()) {
+        queueCursor(context, viewport.area_.x, viewport.area_.y, viewport.area_, 0);
+        return;
+    }
+    const auto top = viewport.first_line_;
+    const auto gh = font_.glyphHeight();
+    // Include a partially visible final row, without walking hidden lines.
+    const auto visible_rows = static_cast<std::size_t>(viewport.area_.height / gh) +
+                              (viewport.area_.height % gh != 0 ? 1u : 0u);
+    const auto count = std::min(visible_rows, lines_.size() - top);
+    for (std::size_t offset = 0; offset < count; ++offset) {
+        const auto& line = lines_[top + offset];
+        if (visible_ <= line.first_character) continue;
+        const auto visible_count = std::min(line.length, visible_ - line.first_character);
+        if (visible_count == 0) continue;
+        const auto y = checkedCoordinate(static_cast<std::int64_t>(viewport.area_.y) +
+                                         static_cast<std::int64_t>(offset) * gh);
+        context.commands_.push_back(Context::TextCommand{
+            viewport.area_.x, y, laid_out_.substr(line.begin, visible_count),
+            color, font_, spacing_, indexed, index, viewport.area_});
+    }
+    const auto offset_y = -static_cast<std::int64_t>(top) * gh;
+    queueCursor(context, viewport.area_.x, viewport.area_.y,
+                viewport.area_, offset_y);
+}
+
+void TextReveal::queueCursor(Context& context, std::int64_t x, std::int64_t y,
+                             std::optional<PanelArea> clip,
+                             std::int64_t y_offset) const {
+    if (positions_.empty() || !options_.cursorEnabled ||
+        (finished() && !options_.cursorAfterComplete)) return;
+    if (options_.cursorBlink && blink_phase_ >= 0.5) return;
+    if (!finished() && fractional_ < 1.0 - options_.cursorLead) return;
+    const auto [at_x, at_y] = positions_[visible_];
+    std::int64_t cursor_x = at_x;
+    std::int64_t cursor_y = at_y;
+    const auto gw = font_.glyphWidth();
+    const bool start_of_line = visible_ == 0 ||
+        (visible_ > 0 && at_y != positions_[visible_ - 1].second);
+    if (finished() && cursor_x + gw > max_width_ && cursor_x != 0) {
+        cursor_x = 0;
+        advance(cursor_y, font_.glyphHeight());
+    } else if (!start_of_line &&
+               cursor_x + gw + options_.cursorGapPx <= max_width_) {
+        advance(cursor_x, options_.cursorGapPx);
+    }
+    // Ignore cursors outside the scroll window instead of queuing distant pixels.
+    const auto pixel_y = y + cursor_y + y_offset;
+    if (clip && (pixel_y >= static_cast<std::int64_t>(clip->y) + clip->height ||
+                 pixel_y + font_.glyphHeight() <= clip->y)) return;
+    context.commands_.push_back(Context::CursorCommand{
+        x + cursor_x, pixel_y, gw, font_.glyphHeight(), options_.cursorColor, clip});
 }
 
 void TextReveal::queue(Context& context, int x, int y, Color color,
@@ -947,29 +1146,7 @@ void TextReveal::queue(Context& context, int x, int y, Color color,
         context.commands_.push_back(Context::TextCommand{
             x, y, std::move(text), color, font_, spacing_, indexed, index, clip});
     }
-    if (!options_.cursorEnabled ||
-        (finished() && !options_.cursorAfterComplete)) return;
-    if (options_.cursorBlink && blink_phase_ >= 0.5) return;
-    if (!finished() && fractional_ < 1.0 - options_.cursorLead) return;
-    const auto [at_x, at_y] = positions_[visible_];
-    std::int64_t cursor_x = at_x;
-    std::int64_t cursor_y = at_y;
-    const auto gw = font_.glyphWidth();
-    const bool start_of_line = visible_ == 0 ||
-        (visible_ > 0 && at_y != positions_[visible_ - 1].second);
-    if (finished() && cursor_x + gw > max_width_ && cursor_x != 0) {
-        // A completed line exactly fills the box: continue on the next row.
-        cursor_x = 0;
-        advance(cursor_y, font_.glyphHeight());
-    } else if (!start_of_line &&
-               cursor_x + gw + options_.cursorGapPx <= max_width_) {
-        // The requested gap must never push the block beyond the text box.
-        advance(cursor_x, options_.cursorGapPx);
-    }
-    context.commands_.push_back(Context::CursorCommand{
-        static_cast<std::int64_t>(x) + cursor_x,
-        static_cast<std::int64_t>(y) + cursor_y,
-        gw, font_.glyphHeight(), options_.cursorColor, clip});
+    queueCursor(context, x, y, clip, 0);
 }
 
 }  // namespace zx

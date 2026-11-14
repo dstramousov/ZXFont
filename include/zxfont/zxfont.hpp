@@ -143,6 +143,61 @@ struct RevealOptions {
 class TextReveal;
 
 /**
+ * @brief Scroll position and clipping area for already laid-out text.
+ *
+ * The viewport does not own text or pixels. configure() reuses the layout
+ * prepared by TextReveal; scrolling never wraps or decodes text again.
+ * Scrolling away from the live line suspends auto-follow until end().
+ */
+class TextViewport {
+public:
+    /** @brief Set the visible area for a prepared TextReveal. */
+    void configure(const TextReveal& text, PanelArea area);
+
+    /** @brief Return to the beginning and enable auto-follow. */
+    void reset() noexcept;
+
+    /** @brief Scroll by signed lines; an actual move disables auto-follow. */
+    void scrollLines(std::int64_t delta) noexcept;
+
+    /** @brief Move by one visible page without recomputing layout. */
+    void pageUp() noexcept;
+    void pageDown() noexcept;
+
+    /** @brief Scroll to the first line and suspend auto-follow. */
+    void home() noexcept;
+
+    /** @brief Return to the latest revealed line and enable auto-follow. */
+    void end(const TextReveal& text) noexcept;
+
+    /** @brief Keep the reveal caret visible if auto-follow is enabled. */
+    void follow(const TextReveal& text) noexcept;
+
+    /** @brief First displayed line (zero-based). */
+    [[nodiscard]] std::size_t firstLine() const noexcept;
+
+    /** @brief Number of fully visible lines, or one for a short viewport. */
+    [[nodiscard]] std::size_t pageLines() const noexcept;
+
+    /** @brief Whether new text will move the viewport automatically. */
+    [[nodiscard]] bool autoFollow() const noexcept;
+
+private:
+    [[nodiscard]] std::size_t maxFirstLine() const noexcept;
+    void positionAt(std::size_t line) noexcept;
+
+    PanelArea area_{};
+    std::size_t total_lines_ = 0;
+    std::size_t revealed_lines_ = 0;
+    std::size_t first_line_ = 0;
+    std::size_t page_lines_ = 1;
+    std::uint32_t line_height_ = 0;
+    bool auto_follow_ = true;
+
+    friend class TextReveal;
+};
+
+/**
  * @brief Stores text drawing commands for a logical pixel-sized canvas.
  *
  * This context does not own a framebuffer or an application window. Rendering
@@ -468,7 +523,32 @@ public:
     /** @brief Palette-indexed reveal within a panel interior. */
     void draw(Context& context, PanelArea area, ColorIndex color) const;
 
+    /** @brief Queue only the lines visible through a configured viewport. */
+    void draw(Context& context, const TextViewport& viewport,
+              Color color = {}) const;
+
+    /** @brief Palette-indexed viewport drawing. */
+    void draw(Context& context, const TextViewport& viewport,
+              ColorIndex color) const;
+
+    /** @brief Current text caret line (zero-based, including explicit LF). */
+    [[nodiscard]] std::size_t caretLine() const noexcept;
+
+    /** @brief Height of a line in the captured bitmap font. */
+    [[nodiscard]] std::uint32_t lineHeight() const noexcept;
+
 private:
+    struct LaidOutLine {
+        std::size_t begin = 0;
+        std::size_t length = 0;
+        std::size_t first_character = 0;
+    };
+
+    [[nodiscard]] bool terminalCaretWraps() const noexcept;
+    void queueViewport(Context& context, const TextViewport& viewport,
+                       Color color, bool indexed, ColorIndex index) const;
+    void queueCursor(Context& context, std::int64_t x, std::int64_t y,
+                     std::optional<PanelArea> clip, std::int64_t y_offset) const;
     void queue(Context& context, int x, int y, Color color,
                bool indexed, ColorIndex index,
                std::optional<PanelArea> clip = std::nullopt) const;
@@ -478,11 +558,14 @@ private:
     std::uint32_t spacing_ = 0;
     std::uint32_t max_width_ = 0;
     std::u32string laid_out_;
+    std::vector<LaidOutLine> lines_;
     TextMetrics metrics_;
     std::vector<std::pair<std::int64_t, std::int64_t>> positions_;
     std::size_t visible_ = 0;
     double fractional_ = 0.0;
     double blink_phase_ = 0.0;
+
+    friend class TextViewport;
 };
 
 }  // namespace zx

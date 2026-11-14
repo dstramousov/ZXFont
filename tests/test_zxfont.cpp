@@ -1049,6 +1049,171 @@ void testPanels() {
     require(renderPanelTest(invalid) == std::vector<std::uint8_t>(w * h * 4, 0));
 }
 
+void testTextViewport() {
+    constexpr std::uint32_t w = 96, h = 64;
+    const zx::ColorIndex textColor{12};
+
+    // A prepared, fully visible UTF-8 message draws exactly the visible rows.
+    zx::Context ui(w, h);
+    zx::RevealOptions static_options;
+    static_options.charsPerSecond = 0;
+    static_options.cursorEnabled = false;
+    zx::TextReveal history(static_options);
+    history.setText(ui, "А\nБ\nВ\nГ\nД\nЕ", 24);
+    require(history.finished() && history.metrics().lines == 6);
+    require(history.caretLine() == 5 && history.lineHeight() == 8);
+    zx::TextViewport view;
+    const zx::PanelArea area{8, 8, 24, 16};
+    view.configure(history, area);
+    require(view.firstLine() == 0 && view.pageLines() == 2);
+    require(view.autoFollow());
+    history.draw(ui, view, textColor);
+    zx::Context expected(w, h);
+    expected.panelText(area, "А\nБ", textColor);
+    require(renderPanelTest(ui) == renderPanelTest(expected));
+
+    // Scrolling does not rewrap, change the source string, or leak outside clip.
+    view.scrollLines(2);
+    require(view.firstLine() == 2 && !view.autoFollow());
+    ui.clear();
+    history.draw(ui, view, textColor);
+    expected.clear();
+    expected.panelText(area, "В\nГ", textColor);
+    require(renderPanelTest(ui) == renderPanelTest(expected));
+    view.pageDown();
+    require(view.firstLine() == 4);
+    view.pageDown();
+    require(view.firstLine() == 4);
+    view.pageUp();
+    require(view.firstLine() == 2);
+    view.home();
+    require(view.firstLine() == 0 && !view.autoFollow());
+    view.end(history);
+    require(view.firstLine() == 4 && view.autoFollow());
+    view.scrollLines(std::numeric_limits<std::int64_t>::min());
+    require(view.firstLine() == 0 && !view.autoFollow());
+    view.scrollLines(std::numeric_limits<std::int64_t>::max());
+    require(view.firstLine() == 4 && !view.autoFollow());
+    view.reset();
+    require(view.firstLine() == 0 && view.autoFollow());
+
+    // Partial final glyph rows are clipped precisely.
+    view.configure(history, {8, 8, 24, 12});
+    ui.clear();
+    history.draw(ui, view, textColor);
+    expected.clear();
+    expected.panelText({8, 8, 24, 12}, "А\nБ", textColor);
+    require(renderPanelTest(ui) == renderPanelTest(expected));
+
+    // Auto-follow advances with the caret, not with the *total* text length.
+    zx::RevealOptions dynamic_options;
+    dynamic_options.charsPerSecond = 10;
+    dynamic_options.cursorEnabled = false;
+    zx::TextReveal typing(dynamic_options);
+    typing.setText(ui, "А\nБ\nВ\nГ\nД\nЕ", 24);
+    view.configure(typing, area);
+    view.reset();
+    view.pageDown(); // The undisclosed future lines are not scrollable yet.
+    require(view.firstLine() == 0 && view.autoFollow());
+    require(view.firstLine() == 0 && typing.caretLine() == 0);
+    typing.update(0.2);
+    require(typing.visibleCharacters() == 2 && typing.caretLine() == 2);
+    view.follow(typing);
+    require(view.firstLine() == 1);
+    typing.update(0.2);
+    require(typing.visibleCharacters() == 4 && typing.caretLine() == 4);
+    view.follow(typing);
+    require(view.firstLine() == 3);
+    view.pageUp();
+    require(view.firstLine() == 1 && !view.autoFollow());
+    typing.finish();
+    view.follow(typing);
+    require(view.firstLine() == 1); // Manual position wins during printing.
+    view.end(typing);
+    require(view.firstLine() == 4 && view.autoFollow());
+
+    // The text is still captured in the original font after switching Context.
+    zx::Context compact(w, h);
+    compact.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    compact.setLetterSpacing(1);
+    history.setText(compact, "Їжак\nПривіт\nҐанок", 42);
+    view.configure(history, {4, 4, 42, 8});
+    view.reset();
+    view.scrollLines(1);
+    compact.setFont(zx::Font{});
+    compact.setLetterSpacing(0);
+    history.draw(compact, view, textColor);
+    zx::Context compact_expected(w, h);
+    compact_expected.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    compact_expected.setLetterSpacing(1);
+    compact_expected.panelText({4, 4, 42, 8}, "Привіт", textColor);
+    require(renderPanelTest(compact) == renderPanelTest(compact_expected));
+
+    // A full-width last row needs an additional row for the trailing cursor.
+    zx::TextReveal full_cursor([] {
+        zx::RevealOptions options;
+        options.charsPerSecond = 0;
+        options.cursorLead = 1;
+        return options;
+    }());
+    full_cursor.setText(ui, "ABC", 24);
+    zx::TextViewport caret_view;
+    caret_view.configure(full_cursor, {8, 8, 24, 8});
+    caret_view.pageUp(); // No actual movement: auto-follow stays enabled.
+    require(caret_view.autoFollow());
+    caret_view.end(full_cursor);
+    require(full_cursor.caretLine() == 1 && caret_view.firstLine() == 1);
+    ui.clear();
+    full_cursor.draw(ui, caret_view, textColor);
+    const auto caret_pixels = renderPanelTest(ui);
+    require(caret_pixels[offset(8, 8, w * 4) + 3] == 255);
+    require(caret_pixels[offset(16, 8, w * 4) + 3] == 0);
+    caret_view.home();
+    ui.clear();
+    full_cursor.draw(ui, caret_view, textColor);
+    expected.clear();
+    expected.text(8, 8, "ABC", textColor);
+    require(renderPanelTest(ui) == renderPanelTest(expected));
+
+    // A blank prepared line still has a visible solid caret.
+    zx::TextReveal blank;
+    blank.setText(ui, "", 24);
+    zx::TextViewport blank_view;
+    blank_view.configure(blank, {8, 8, 24, 8});
+    ui.clear();
+    blank.draw(ui, blank_view, textColor);
+    require(renderPanelTest(ui)[offset(8, 8, w * 4) + 3] == 255);
+
+    // A viewport must match the prepared line width, including after reflow.
+    require(throws<std::invalid_argument>([&] {
+        view.configure(history, {4, 4, 24, 8});
+    }));
+    require(throws<std::invalid_argument>([&] {
+        view.configure(history, {4, 4, 42, 0});
+    }));
+    zx::TextViewport unconfigured;
+    require(throws<std::invalid_argument>([&] {
+        history.draw(compact, unconfigured, textColor);
+    }));
+    require(throws<std::invalid_argument>([&] {
+        typing.draw(compact, view, textColor);
+    }));
+
+    // Long history: accessing its end has no need to render earlier lines.
+    std::string many;
+    for (int n = 0; n < 1500; ++n) many += "АБВ\n";
+    zx::TextReveal big(static_options);
+    big.setText(ui, many, 24);
+    view.configure(big, area);
+    view.end(big);
+    require(view.firstLine() == 1499);
+    ui.clear();
+    big.draw(ui, view, textColor);
+    expected.clear();
+    expected.panelText(area, "АБВ", textColor);
+    require(renderPanelTest(ui) == renderPanelTest(expected));
+}
+
 }  // namespace
 
 int main() {
@@ -1065,4 +1230,5 @@ int main() {
     testTextReveal();
     testPseudographics();
     testPanels();
+    testTextViewport();
 }

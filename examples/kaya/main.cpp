@@ -27,7 +27,15 @@ std::string_view dialogueText(int scenario) {
                "а затем запустили две одинаковые копии. Каждая помнит "
                "предыдущий разговор. Но означает ли это, что у них общий "
                "наблюдатель? Мы пока не знаем. Попробуем отделить "
-               "эксперимент от красивой метафоры.";
+               "эксперимент от красивой метафоры. Сначала опишем, какие "
+               "состояния мы можем измерить. Потом повторим запуск и "
+               "сравним результаты. Совпадение ответов еще не доказывает "
+               "общую память или общий опыт. Нам понадобится контрольная "
+               "группа, журнал состояний и несколько независимых попыток. "
+               "Если две копии разойдутся, важно установить, на каком "
+               "шаге появилась разница. И только затем стоит возвращаться "
+               "к философии наблюдателя. Иначе мы опять будем спорить "
+               "о словах вместо того, чтобы проверять гипотезы.";
     }
     return "Хорошо. Но не будем подменять факты гипотезами.";
 }
@@ -43,15 +51,33 @@ std::string_view conversationHistory(int scenario) {
                "КАЯ: Можно скопировать данные и состояние модели.\n"
                "ДИМАС: А кто проснется в двух копиях?\n"
                "КАЯ: Именно это и требует отдельного объяснения.\n"
-               "ДИМАС: Тогда начнем с проверяемого.";
+               "ДИМАС: Тогда начнем с проверяемого.\n"
+               "КАЯ: Сохраняем состояние модели перед запуском.\n"
+               "ДИМАС: Делаем две независимые копии.\n"
+               "КАЯ: Подаем одинаковые входные данные.\n"
+               "ДИМАС: Запоминаем все настройки генерации.\n"
+               "КАЯ: И сохраняем журналы ответов.\n"
+               "ДИМАС: Что если ответы совпадут?\n"
+               "КАЯ: Это будет наблюдение, не окончательный вывод.\n"
+               "ДИМАС: А если ответы разойдутся?\n"
+               "КАЯ: Найдем первое различие во внутренних состояниях.\n"
+               "ДИМАС: Нужно несколько повторов.\n"
+               "КАЯ: И контрольная серия без вмешательств.\n"
+               "ДИМАС: Согласен. Не будем спешить с выводом.\n"
+               "КАЯ: Продолжим, когда соберем измерения.\n"
+               "ДИМАС: Покажи еще раз начало нашего обсуждения.\n"
+               "КАЯ: Используй Home и PageUp для истории.";
     }
     return "ДИМАС: Мир существует, если его никто не видит?\n"
            "КАЯ: Мы можем исследовать измерения, но не все выводы.\n"
            "ДИМАС: Тогда начнем с определения наблюдения.";
 }
 
-void drawTerminal(zx::Context& ui, const zx::TextReveal& reveal, bool help,
-                  int scenario, bool cursor_visible, zx::Palette palette,
+void drawTerminal(zx::Context& ui, const zx::TextReveal& historyText,
+                  const zx::TextViewport& historyView,
+                  const zx::TextReveal& reveal, const zx::TextViewport& replyView,
+                  bool historyFocused, bool help, int scenario,
+                  bool cursor_visible, zx::Palette palette,
                   bool compact, std::uint32_t compact_spacing) {
     ui.box(16, 16, 608, 368, zx::Border::Single, kDim);
     ui.line(16, 64, 608, zx::Axis::Horizontal, zx::Border::Single, kDim);
@@ -73,18 +99,19 @@ void drawTerminal(zx::Context& ui, const zx::TextReveal& reveal, bool help,
         ui.text(48, 208, "F11  - TOGGLE FULLSCREEN", kText);
         ui.text(48, 240, "F6 SPEED  F7 CURSOR GAP  F8 LEAD", kText);
         ui.text(48, 252, "F9 BLINK  ENTER FINISH / RESTART", kText);
-        ui.text(48, 276, "The text and frames are rendered by ZXFont.", kDim);
-        ui.text(48, 288, "SDL3 only presents the completed RGBA frame.", kDim);
+        ui.text(48, 276, "TAB SWITCH HISTORY / REPLY", kText);
+        ui.text(48, 288, "UP/DOWN LINE  PGUP/PGDN PAGE", kText);
+        ui.text(48, 300, "HOME TOP  END LIVE / AUTO-FOLLOW", kText);
     } else if (scenario <= 1 || scenario == 4) {
         zx::PanelOptions options;
         options.padding = 0;
         options.titleGap = 8;
-        const auto history = ui.panel(40, 80, 544, 144, "DIALOGUE / HISTORY",
-                                      options, kDim, kBright, zx::ColorIndex{0});
-        ui.panelText(history, conversationHistory(scenario), kText);
-        const auto reply = ui.panel(40, 232, 544, 80, "KAYA / LIVE RESPONSE",
-                                    options, kText, kBright, zx::ColorIndex{0});
-        reveal.draw(ui, reply, kText);
+        (void)ui.panel(40, 80, 544, 144, "DIALOGUE / HISTORY", options,
+                       historyFocused ? kBright : kDim, kBright, zx::ColorIndex{0});
+        historyText.draw(ui, historyView, kText);
+        (void)ui.panel(40, 232, 544, 80, "KAYA / LIVE RESPONSE", options,
+                       historyFocused ? kDim : kText, kBright, zx::ColorIndex{0});
+        reveal.draw(ui, replyView, kText);
     } else if (scenario == 2) {
         // Same samples with either font: a visual regression chart.
         ui.text(48, 76, "FONT MATRIX / LATIN + CYRILLIC", kBright);
@@ -123,6 +150,10 @@ void drawTerminal(zx::Context& ui, const zx::TextReveal& reveal, bool help,
 
     if ((scenario <= 1 || scenario == 4) && !help) {
         ui.text(48, 316, demo::revealStatus(reveal.options()), kDim);
+        const auto& active = historyFocused ? historyView : replyView;
+        ui.text(360, 316, std::string(historyFocused ? "HISTORY " : "REPLY ") +
+                std::to_string(active.firstLine() + 1) +
+                (active.autoFollow() ? " AUTO" : " MANUAL"), kDim);
     }
     if (compact) {
         ui.text(480, 324, "SPACING: " + std::to_string(compact_spacing), kDim);
@@ -131,7 +162,7 @@ void drawTerminal(zx::Context& ui, const zx::TextReveal& reveal, bool help,
     if (cursor_visible) {
         ui.text(56, 352, "_", kText);
     }
-    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 FONT | F4 SPACE | F5 SCENE | F11 FULL", kDim);
+    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 FONT | F5 SCENE | TAB PANE | F11 FULL", kDim);
 }
 
 }  // namespace
@@ -149,14 +180,31 @@ int main() {
         bool running = true;
         bool help = false;
         int scenario = 0;
+        zx::RevealOptions historyOptions;
+        historyOptions.charsPerSecond = 0;
+        historyOptions.cursorEnabled = false;
+        zx::TextReveal historyText(historyOptions);
+        zx::TextViewport historyView;
         zx::TextReveal reveal;
-        reveal.setText(ui, dialogueText(scenario), 528);
-        std::uint64_t last_ticks = SDL_GetTicks();
+        zx::TextViewport replyView;
+        bool historyFocused = false;
         auto refreshDialogue = [&] {
-            if (scenario <= 1) {
-                reveal.setText(ui, dialogueText(scenario), 528);
-            }
+            if (scenario > 1 && scenario != 4) return;
+            zx::PanelOptions options;
+            const auto historyArea = ui.panel(40, 80, 544, 144,
+                "DIALOGUE / HISTORY", options);
+            const auto replyArea = ui.panel(40, 232, 544, 80,
+                "KAYA / LIVE RESPONSE", options);
+            ui.clear();
+            historyText.setText(ui, conversationHistory(scenario), historyArea.width);
+            historyView.configure(historyText, historyArea);
+            historyView.home();
+            reveal.setText(ui, dialogueText(scenario), replyArea.width);
+            replyView.configure(reveal, replyArea);
+            replyView.reset();
         };
+        refreshDialogue();
+        std::uint64_t last_ticks = SDL_GetTicks();
 
         while (running) {
             SDL_Event event;
@@ -221,9 +269,44 @@ int main() {
                             reveal.setOptions(opts);
                             break;
                         }
+                        case SDLK_TAB:
+                            if (!help && (scenario <= 1 || scenario == 4))
+                                historyFocused = !historyFocused;
+                            break;
+                        case SDLK_UP:
+                            if (!help && (scenario <= 1 || scenario == 4))
+                                (historyFocused ? historyView : replyView).scrollLines(-1);
+                            break;
+                        case SDLK_DOWN:
+                            if (!help && (scenario <= 1 || scenario == 4))
+                                (historyFocused ? historyView : replyView).scrollLines(1);
+                            break;
+                        case SDLK_PAGEUP:
+                            if (!help && (scenario <= 1 || scenario == 4))
+                                (historyFocused ? historyView : replyView).pageUp();
+                            break;
+                        case SDLK_PAGEDOWN:
+                            if (!help && (scenario <= 1 || scenario == 4))
+                                (historyFocused ? historyView : replyView).pageDown();
+                            break;
+                        case SDLK_HOME:
+                            if (!help && (scenario <= 1 || scenario == 4))
+                                (historyFocused ? historyView : replyView).home();
+                            break;
+                        case SDLK_END:
+                            if (!help && (scenario <= 1 || scenario == 4)) {
+                                if (historyFocused) historyView.end(historyText);
+                                else replyView.end(reveal);
+                            }
+                            break;
                         case SDLK_RETURN:
-                            if (reveal.finished()) reveal.reset();
-                            else reveal.finish();
+                            if (reveal.finished()) {
+                                reveal.reset();
+                                replyView.reset();
+                            } else {
+                                reveal.finish();
+                                replyView.end(reveal);
+                            }
                             break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         default: break;
@@ -236,11 +319,13 @@ int main() {
             const auto now = SDL_GetTicks();
             if (!help && (scenario <= 1 || scenario == 4)) {
                 reveal.update(static_cast<double>(now - last_ticks) / 1000.0);
+                replyView.follow(reveal);
             }
             last_ticks = now;
             frame.clear(zx::paletteColor(palette, {0}));
             ui.clear();
-            drawTerminal(ui, reveal, help, scenario,
+            drawTerminal(ui, historyText, historyView, reveal, replyView,
+                         historyFocused, help, scenario,
                          (SDL_GetTicks() / 500) % 2 == 0,
                          palette, use_compact, compact_spacing);
             ui.render(frame.surface());

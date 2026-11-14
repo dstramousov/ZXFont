@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.14)
+# ZXFont Core API (v0.0.15)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -325,3 +325,58 @@ reply.setText(ui, "Привет, Димас!", content.width);
 reply.update(elapsed_seconds);
 reply.draw(ui, content, zx::ColorIndex{12});
 ```
+
+## Scrolling long text (v0.0.15)
+
+`TextViewport` is a small independent scroll controller for `TextReveal`. It
+stores a clipped `PanelArea`, the current first row, the line height, and the
+auto-follow setting. It **does not** re-decode or re-wrap the message on scroll.
+`TextReveal::draw(context, viewport, color)` enqueues only the visible rows,
+so hidden earlier pages are not processed on each rendered frame. Indexed
+colors and cursor clipping behave exactly as in the non-scrolling overloads.
+
+```cpp
+zx::TextReveal reply;
+reply.setText(ui, longAnswer, area.width);
+zx::TextViewport viewport;
+viewport.configure(reply, area);
+
+// Each frame, before ui.render():
+reply.update(deltaSeconds);
+viewport.follow(reply);
+reply.draw(ui, viewport, zx::ColorIndex{12});
+
+// User navigation:
+viewport.scrollLines(-1);  // Up one line and suspend auto-follow.
+viewport.pageUp();         // Up by a whole page.
+viewport.pageDown();       // Down by a whole page.
+viewport.home();           // Beginning, auto-follow remains suspended.
+viewport.end(reply);       // Latest revealed row, resume auto-follow.
+```
+
+- `configure(text, area)` requires `area.width` to match the width supplied to
+  `TextReveal::setText()`, and a positive height; mismatched geometry throws
+  `std::invalid_argument`. Call both again after changing the text, wrapping
+  width, font, or letter spacing. Reconfiguring with new geometry keeps the
+  current first line when possible.
+- `reset()` moves to the first line and enables auto-follow; `home()` also
+  moves to the first line but **disables** auto-follow.
+- `scrollLines(delta)` accepts signed 64-bit line counts, clamps to the
+  already revealed range, and disables following only when the position
+  changes; zero and navigation blocked at an edge leave the state unchanged.
+  The user cannot scroll ahead into unrevealed blank pages.
+- `firstLine()` is zero-based; `pageLines()` reports completely visible rows
+  (at least one). `autoFollow()` reports whether new characters can move the
+  viewport. Partial bottom rows are pixel-clipped by the RGBA renderer.
+- `TextReveal::caretLine()` returns the zero-based logical line where the next
+  glyph would be printed; `lineHeight()` reports its captured font height.
+- `end(reveal)` follows the **revealed** end, not the blank bottom of the full
+  unrevealed message. While manually scrolled up, `follow(reveal)` has no
+  effect. Moving with End explicitly resumes auto-follow.
+- The core only handles layout, scroll state, and drawing. Input events,
+  scrolling speed, and the presentation window remain the host's job.
+
+Kaya uses `Tab` to choose the history or live response viewport, arrows for
+single lines, PageUp/PageDown for pages, and Home/End. Mode256 binds its
+PageUp/PageDown and Home/End to dialogue scrolling, leaving arrows to the
+simulated game movement. Both demos supply long dialogue examples via F5.

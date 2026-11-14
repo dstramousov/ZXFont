@@ -21,7 +21,11 @@ constexpr zx::ColorIndex kPanel{12};
 std::string_view dialogueText(int scenario) {
     switch (scenario) {
         case 1: return "Я не знаю. Но готов это проверить.";
-        case 2: return "Главное - не путать гипотезу с фактом.";
+        case 2: return "Главное - не путать гипотезу с фактом. Мы проверим "
+                       "каждую версию отдельно. Сначала соберем показания "
+                       "приборов. Затем повторим эксперимент и сравним "
+                       "полученные данные. Если результат изменится, "
+                       "попробуем понять, что именно на него повлияло.";
         default: return "Ты уверен, что мир реален без наблюдателя?";
     }
 }
@@ -65,7 +69,8 @@ void drawWorld(demo::Frame& frame, int hero_x) {
     frame.rect(181, 130, 3, 6, {33, 41, 65, 255});
 }
 
-void drawUi(zx::Context& ui, const zx::TextReveal& reveal, bool help,
+void drawUi(zx::Context& ui, const zx::TextReveal& reveal,
+            const zx::TextViewport& viewport, bool help,
             bool dialog, int scenario, zx::Palette palette, bool compact,
             std::uint32_t compact_spacing) {
     ui.text(8, 8, "HP: 100  LVL: 03", kHud);
@@ -80,7 +85,7 @@ void drawUi(zx::Context& ui, const zx::TextReveal& reveal, bool help,
         ui.text(24, 144, "F2 COLOR F3 FONT F4 SPACE", kPanel);
         ui.text(24, 152, "F6 SPEED F7 GAP F8 LEAD", kPanel);
         ui.text(24, 160, "F9 BLINK ENTER SKIP/REPLAY", kPanel);
-        ui.text(24, 168, "SPACE HIDE DIALOG", kPanel);
+        ui.text(24, 168, "SPACE HIDE / PGUP PGDN", kPanel);
         return;
     }
     if (!dialog) {
@@ -117,10 +122,10 @@ void drawUi(zx::Context& ui, const zx::TextReveal& reveal, bool help,
     zx::PanelOptions options;
     options.padding = 0;
     options.titleGap = 8;
-    const auto content = ui.panel(8, 128, 240, 56,
-                                  scenario == 1 ? "ДИМАС:" : "КАЯ:",
-                                  options, kPanel, kHud, zx::ColorIndex{0});
-    reveal.draw(ui, content, kPanel);
+    (void)ui.panel(8, 128, 240, 56,
+                   scenario == 1 ? "ДИМАС:" : "КАЯ:",
+                   options, kPanel, kHud, zx::ColorIndex{0});
+    reveal.draw(ui, viewport, kPanel);
 }
 
 }  // namespace
@@ -141,11 +146,18 @@ int main() {
         int scenario = 0;
         int hero_x = 74;
         zx::TextReveal reveal;
-        reveal.setText(ui, dialogueText(scenario), 224);
-        std::uint64_t last_ticks = SDL_GetTicks();
+        zx::TextViewport viewport;
         auto refreshDialogue = [&] {
-            if (scenario <= 2) reveal.setText(ui, dialogueText(scenario), 224);
+            if (scenario > 2) return;
+            const auto content = ui.panel(8, 128, 240, 56,
+                scenario == 1 ? "ДИМАС:" : "КАЯ:");
+            ui.clear();
+            reveal.setText(ui, dialogueText(scenario), content.width);
+            viewport.configure(reveal, content);
+            viewport.reset();
         };
+        refreshDialogue();
+        std::uint64_t last_ticks = SDL_GetTicks();
 
         while (running) {
             SDL_Event event;
@@ -210,9 +222,18 @@ int main() {
                             reveal.setOptions(opts);
                             break;
                         }
+                        case SDLK_PAGEUP: viewport.pageUp(); break;
+                        case SDLK_PAGEDOWN: viewport.pageDown(); break;
+                        case SDLK_HOME: viewport.home(); break;
+                        case SDLK_END: viewport.end(reveal); break;
                         case SDLK_RETURN:
-                            if (reveal.finished()) reveal.reset();
-                            else reveal.finish();
+                            if (reveal.finished()) {
+                                reveal.reset();
+                                viewport.reset();
+                            } else {
+                                reveal.finish();
+                                viewport.end(reveal);
+                            }
                             break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         case SDLK_SPACE: dialog = !dialog; break;
@@ -231,13 +252,14 @@ int main() {
             const auto now = SDL_GetTicks();
             if (!help && dialog && scenario <= 2) {
                 reveal.update(static_cast<double>(now - last_ticks) / 1000.0);
+                viewport.follow(reveal);
             }
             last_ticks = now;
             drawWorld(frame, hero_x);
             // Compose ZXFont directly over the host-owned game framebuffer.
             ui.clear();
-            drawUi(ui, reveal, help, dialog, scenario, palette, use_compact,
-                   compact_spacing);
+            drawUi(ui, reveal, viewport, help, dialog, scenario, palette,
+                   use_compact, compact_spacing);
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);
