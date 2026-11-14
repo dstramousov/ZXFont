@@ -37,6 +37,26 @@ enum class Border { Single, Double, Block };
 /** @brief Orientation of a pseudographic line. */
 enum class Axis { Horizontal, Vertical };
 
+/** @brief Horizontal text alignment within a panel content area. */
+enum class TextAlign { Left, Center, Right };
+
+/** @brief Geometry options for a bordered panel. */
+struct PanelOptions {
+    Border border = Border::Single;
+    std::uint32_t padding = 0;  // Extra pixels beyond the 8-pixel border inset.
+    std::uint32_t titleGap = 8; // Space below the title, if present.
+    TextAlign titleAlign = TextAlign::Left;
+};
+
+/** @brief Usable panel interior, in logical pixel coordinates. */
+struct PanelArea {
+    int x = 0;
+    int y = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
+
+
 /**
  * @brief Resolve a palette entry to an RGBA color.
  *
@@ -260,6 +280,43 @@ public:
     void line(int x, int y, std::uint32_t length, Axis axis,
               Border border, ColorIndex color);
 
+    /**
+     * @brief Draw a framed panel and optional single-line title.
+     *
+     * The returned area excludes the 8-pixel border, extra padding, and
+     * (when supplied) the title plus titleGap. Text uses the current font;
+     * frame geometry remains on the fixed 8x8 grid. Panel dimensions must
+     * be multiples of 8 and large enough for at least one text cell.
+     * The title is clipped and aligned within the panel interior.
+     * @throws std::invalid_argument For insufficient room or invalid options.
+     */
+    [[nodiscard]] PanelArea panel(int x, int y, std::uint32_t width,
+                                  std::uint32_t height, std::string_view title = {},
+                                  PanelOptions options = {},
+                                  Color border_color = {}, Color title_color = {},
+                                  std::optional<Color> fill = std::nullopt);
+
+    /** @brief Indexed panel colors, resolved against the palette at render time. */
+    [[nodiscard]] PanelArea panel(int x, int y, std::uint32_t width,
+                                  std::uint32_t height, std::string_view title,
+                                  PanelOptions options, ColorIndex border_color,
+                                  ColorIndex title_color,
+                                  std::optional<ColorIndex> fill = std::nullopt);
+
+    /**
+     * @brief Wrap, align, and clip text to a panel interior.
+     *
+     * Full layout is computed using the current font and letter spacing.
+     * Vertically overflowing lines are clipped; partial glyphs are clipped
+     * pixel-exactly. The caller may supply a PanelArea returned by panel().
+     */
+    void panelText(PanelArea area, std::string_view value,
+                   Color color = {}, TextAlign align = TextAlign::Left);
+
+    /** @brief Palette-indexed panel text. */
+    void panelText(PanelArea area, std::string_view value,
+                   ColorIndex color, TextAlign align = TextAlign::Left);
+
     /** @brief Remove all queued drawing commands without changing any pixels. */
     void clear() noexcept;
 
@@ -285,6 +342,7 @@ private:
         std::uint32_t letter_spacing = 0;
         bool indexed = false;
         ColorIndex index{0};
+        std::optional<PanelArea> clip;
     };
 
     struct BoxCommand {
@@ -306,6 +364,7 @@ private:
         std::uint32_t width;
         std::uint32_t height;
         ColorIndex color;
+        std::optional<PanelArea> clip;
     };
 
     struct LineCommand {
@@ -324,6 +383,16 @@ private:
     void appendBox(int x, int y, std::uint32_t max_width,
                    std::string_view value, Color color, bool indexed,
                    ColorIndex index);
+    [[nodiscard]] PanelArea appendPanel(int x, int y, std::uint32_t width,
+                                         std::uint32_t height, std::string_view title,
+                                         PanelOptions options, Color border_color,
+                                         Color title_color, bool indexed,
+                                         ColorIndex border_index,
+                                         ColorIndex title_index,
+                                         std::optional<Color> fill,
+                                         std::optional<ColorIndex> fill_index);
+    void appendPanelText(PanelArea area, std::string_view value, Color color,
+                         bool indexed, ColorIndex index, TextAlign align);
 
     std::uint32_t width_;
     std::uint32_t height_;
@@ -393,9 +462,16 @@ public:
     /** @brief Queue visible text and an optional cursor with indexed text color. */
     void draw(Context& context, int x, int y, ColorIndex color) const;
 
+    /** @brief Draw visible text and cursor, clipped to a panel interior. */
+    void draw(Context& context, PanelArea area, Color color = {}) const;
+
+    /** @brief Palette-indexed reveal within a panel interior. */
+    void draw(Context& context, PanelArea area, ColorIndex color) const;
+
 private:
     void queue(Context& context, int x, int y, Color color,
-               bool indexed, ColorIndex index) const;
+               bool indexed, ColorIndex index,
+               std::optional<PanelArea> clip = std::nullopt) const;
 
     RevealOptions options_;
     Font font_;

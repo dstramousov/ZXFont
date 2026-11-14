@@ -114,18 +114,13 @@ void drawUi(zx::Context& ui, const zx::TextReveal& reveal, bool help,
         ui.text(24, 160, "F3 FONT / F5 NEXT", kPanel);
         return;
     }
-    ui.box(8, 128, 240, 56, zx::Border::Single, kPanel,
-           zx::ColorIndex{0});
-    if (scenario == 0) {
-        ui.text(24, 136, "КАЯ:", kHud);
-        reveal.draw(ui, 24, 152, kPanel);
-    } else if (scenario == 1) {
-        ui.text(24, 136, "ДИМАС:", kHud);
-        reveal.draw(ui, 24, 152, kPanel);
-    } else {
-        ui.text(24, 136, "КАЯ:", kHud);
-        reveal.draw(ui, 24, 152, kPanel);
-    }
+    zx::PanelOptions options;
+    options.padding = 0;
+    options.titleGap = 8;
+    const auto content = ui.panel(8, 128, 240, 56,
+                                  scenario == 1 ? "ДИМАС:" : "КАЯ:",
+                                  options, kPanel, kHud, zx::ColorIndex{0});
+    reveal.draw(ui, content, kPanel);
 }
 
 }  // namespace
@@ -146,10 +141,10 @@ int main() {
         int scenario = 0;
         int hero_x = 74;
         zx::TextReveal reveal;
-        reveal.setText(ui, dialogueText(scenario), 208);
+        reveal.setText(ui, dialogueText(scenario), 224);
         std::uint64_t last_ticks = SDL_GetTicks();
         auto refreshDialogue = [&] {
-            if (scenario <= 2) reveal.setText(ui, dialogueText(scenario), 208);
+            if (scenario <= 2) reveal.setText(ui, dialogueText(scenario), 224);
         };
 
         while (running) {

@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.12)
+# ZXFont Core API (v0.0.14)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -282,3 +282,46 @@ Both SDL3 demos use F6 (speed: 0/10/30/60/120 CPS), F7 (cursor gap 0..3 px),
 F8 (cursor lead 25/50/100%), F9 (blink) and Enter (finish/replay). These are
 demo controls, **not** core ZXFont hotkeys. Full frame CRT effects are outside
 the scope of the library and were not added.
+
+
+## Framed panels and bounded text (v0.0.14)
+
+`Context::panel(x, y, width, height, title, options, borderColor,
+ titleColor, optionalFill)` queues a box and an optional one-line title,
+then returns `PanelArea {x, y, width, height}` for the remaining interior.
+There are overloads for explicit `Color` and palette-indexed `ColorIndex`.
+
+`PanelOptions` defaults to `Border::Single`, `padding=0`, `titleGap=8`,
+`titleAlign=TextAlign::Left`. The fixed 8-pixel frame inset is always applied;
+`padding` adds pixels on all sides beyond it. `titleGap` is used only if a
+nonempty title is present, after one glyph-height reserved for the title.
+The title does not take part in wrapping; excessively long titles are clipped.
+A title containing LF is invalid. Small or misaligned panels throw before
+adding any commands; dimensions must be multiples of 8 and leave room for
+at least one text cell in the body, including after title placement.
+
+`Context::panelText(area, text, color, align=TextAlign::Left)` wraps by the
+same rules as `textBox()` and aligns *each wrapped line* within the supplied
+`PanelArea`. Its RGBA and indexed overloads clip individual pixels at all
+four sides, including partially visible glyphs. `TextAlign` supports `Left`,
+`Center` and `Right`. Callers may also construct a `PanelArea` themselves.
+
+`TextReveal::draw(context, area, color)` has two new overloads, with RGBA or
+indexed text colors. Both the visible glyphs and the solid cursor are clipped
+to the same bounds. For matching layout, call `setText(context, message,
+area.width)` before starting the animation. Panel drawing does not alter the
+selected font, spacing, or palette. It does not scroll content or manage input.
+
+```cpp
+zx::PanelOptions panel_options;
+panel_options.padding = 0;
+panel_options.titleGap = 8;
+auto content = ui.panel(8, 128, 240, 56, "КАЯ:", panel_options,
+                        zx::ColorIndex{12}, zx::ColorIndex{15},
+                        zx::ColorIndex{0});
+
+zx::TextReveal reply;
+reply.setText(ui, "Привет, Димас!", content.width);
+reply.update(elapsed_seconds);
+reply.draw(ui, content, zx::ColorIndex{12});
+```

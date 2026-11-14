@@ -910,6 +910,145 @@ void testPseudographics() {
     require(std::all_of(empty.begin(), empty.end(), [](auto b) { return b == 0; }));
 }
 
+
+std::vector<std::uint8_t> renderPanelTest(const zx::Context& ui) {
+    std::vector<std::uint8_t> pixels(
+        static_cast<std::size_t>(ui.width()) * ui.height() * 4, 0);
+    ui.render({pixels, ui.width(), ui.height(), ui.width() * 4});
+    return pixels;
+}
+
+void testPanels() {
+    constexpr std::uint32_t w = 120, h = 88;
+    const zx::Color border{10, 30, 50, 255};
+    const zx::Color title{70, 90, 110, 255};
+    const zx::Color body{220, 140, 30, 255};
+    zx::Context bare(w, h);
+    const auto area = bare.panel(8, 8, 80, 64, "TITLE", {}, border, title);
+    require(area.x == 16 && area.y == 32 &&
+            area.width == 64 && area.height == 32);
+    const auto baseline = renderPanelTest(bare);
+
+    zx::Context with_body(w, h);
+    const auto body_area = with_body.panel(8, 8, 80, 64, "TITLE", {}, border, title);
+    with_body.panelText(body_area,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 ABCDEFGHIJKLMNOPQRSTUVWXYZ", body);
+    const auto output = renderPanelTest(with_body);
+    bool ink_inside = false;
+    for (std::uint32_t y = 0; y < h; ++y) {
+        for (std::uint32_t x = 0; x < w; ++x) {
+            const auto i = offset(x, y, w * 4);
+            const bool inside = x >= static_cast<std::uint32_t>(area.x) &&
+                x < static_cast<std::uint32_t>(area.x) + area.width &&
+                y >= static_cast<std::uint32_t>(area.y) &&
+                y < static_cast<std::uint32_t>(area.y) + area.height;
+            const bool changed = !std::equal(output.begin() + i, output.begin() + i + 4,
+                                             baseline.begin() + i);
+            if (inside) ink_inside |= changed;
+            else require(!changed);
+        }
+    }
+    require(ink_inside);
+
+    // Different text alignments must match equivalent manually positioned glyphs.
+    zx::Context centered(w, h), expected(w, h);
+    const zx::PanelArea place{16, 16, 64, 24};
+    centered.panelText(place, "AB", body, zx::TextAlign::Center);
+    expected.text(40, 16, "AB", body);
+    require(renderPanelTest(centered) == renderPanelTest(expected));
+    centered.clear();
+    expected.clear();
+    centered.panelText(place, "AB", body, zx::TextAlign::Right);
+    expected.text(64, 16, "AB", body);
+    require(renderPanelTest(centered) == renderPanelTest(expected));
+
+    // Title is clipped, too, even when wider than the panel.
+    zx::Context long_title(w, h), short_title(w, h);
+    (void)long_title.panel(8, 8, 80, 64, "A VERY LONG TITLE THAT DOES NOT FIT");
+    (void)short_title.panel(8, 8, 80, 64, "A VERY L");
+    require(renderPanelTest(long_title) == renderPanelTest(short_title));
+
+    zx::PanelOptions with_padding;
+    with_padding.padding = 4;
+    with_padding.titleGap = 2;
+    const auto padded = bare.panel(8, 8, 80, 64, "X", with_padding);
+    require(padded.x == 20 && padded.y == 30 &&
+            padded.width == 56 && padded.height == 30);
+
+    // Small interior height clips individual glyph pixels, not only whole lines.
+    zx::Context partial(w, h);
+    partial.panelText({16, 16, 8, 4}, "W", body);
+    const auto clipped = renderPanelTest(partial);
+    zx::Context full(w, h);
+    full.text(16, 16, "W", body);
+    const auto full_pixels = renderPanelTest(full);
+    for (std::uint32_t y = 0; y < h; ++y) {
+        for (std::uint32_t x = 0; x < w; ++x) {
+            const auto i = offset(x, y, w * 4);
+            if (y >= 16 && y < 20 && x >= 16 && x < 24) {
+                require(clipped[i] == full_pixels[i]);
+            } else {
+                require(clipped[i + 3] == 0);
+            }
+        }
+    }
+
+    // Reveal cursor and text must both respect a panel's clipping rectangle.
+    zx::Context revealed(w, h);
+    zx::TextReveal reveal;
+    reveal.setText(revealed, "HELLO WORLD", 16);
+    reveal.finish();
+    reveal.draw(revealed, zx::PanelArea{16, 16, 16, 8}, body);
+    const auto reveal_pixels = renderPanelTest(revealed);
+    for (std::uint32_t y = 0; y < h; ++y) {
+        for (std::uint32_t x = 0; x < w; ++x) {
+            const auto i = offset(x, y, w * 4);
+            if (x < 16 || x >= 32 || y < 16 || y >= 24) {
+                require(reveal_pixels[i + 3] == 0);
+            }
+        }
+    }
+
+    // Indexed colors remain dynamic; selected font changes do not affect the frame.
+    zx::Context indexed(w, h);
+    auto index_area = indexed.panel(8, 8, 80, 64, "Кая", {},
+        zx::ColorIndex{10}, zx::ColorIndex{15}, zx::ColorIndex{0});
+    indexed.panelText(index_area, "Привет", zx::ColorIndex{12});
+    indexed.setPalette(zx::Palette::VGA);
+    const auto vga = renderPanelTest(indexed);
+    indexed.setPalette(zx::Palette::MonoAmber);
+    require(vga != renderPanelTest(indexed));
+
+    zx::Context fonts(w, h);
+    (void)fonts.panel(8, 8, 80, 64, "TITLE");
+    const auto default_pixels = renderPanelTest(fonts);
+    fonts.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    require(renderPanelTest(fonts) == default_pixels);
+
+    // Validation must fail before queuing a partial frame.
+    zx::Context invalid(w, h);
+    require(throws<std::invalid_argument>([&] {
+        (void)invalid.panel(0, 0, 24, 24, "TITLE");
+    }));
+    require(throws<std::invalid_argument>([&] {
+        (void)invalid.panel(0, 0, 80, 64, "T\nA");
+    }));
+    require(throws<std::invalid_argument>([&] {
+        (void)invalid.panel(0, 0, 80, 64, "T", {.border = static_cast<zx::Border>(255)});
+    }));
+    require(throws<std::invalid_argument>([&] {
+        invalid.panelText({0, 0, 4, 8}, "A");
+    }));
+    require(throws<std::invalid_argument>([&] {
+        invalid.panelText({0, 0, 32, 8}, "A", zx::Color{}, static_cast<zx::TextAlign>(255));
+    }));
+    require(throws<std::out_of_range>([&] {
+        (void)invalid.panel(0, 0, 80, 64, "T", {},
+                            zx::ColorIndex{16}, zx::ColorIndex{15});
+    }));
+    require(renderPanelTest(invalid) == std::vector<std::uint8_t>(w * h * 4, 0));
+}
+
 }  // namespace
 
 int main() {
@@ -925,4 +1064,5 @@ int main() {
     testTextLayout();
     testTextReveal();
     testPseudographics();
+    testPanels();
 }

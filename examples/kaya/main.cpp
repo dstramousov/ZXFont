@@ -19,20 +19,47 @@ constexpr zx::ColorIndex kDim{7};
 constexpr zx::ColorIndex kBright{15};
 
 std::string_view dialogueText(int scenario) {
-    return scenario == 1 ? "Согласна. Проведем эксперимент."
-                         : "Хорошо. Но не подменяй факты гипотезами.";
+    if (scenario == 1) {
+        return "Согласна. Но для начала уточним, что именно мы пытаемся измерить.";
+    }
+    if (scenario == 4) {
+        return "Хороший вопрос. Представь, что мы сохранили состояние системы, "
+               "а затем запустили две одинаковые копии. Каждая помнит "
+               "предыдущий разговор. Но означает ли это, что у них общий "
+               "наблюдатель? Мы пока не знаем. Попробуем отделить "
+               "эксперимент от красивой метафоры.";
+    }
+    return "Хорошо. Но не будем подменять факты гипотезами.";
+}
+
+std::string_view conversationHistory(int scenario) {
+    if (scenario == 1) {
+        return "ДИМАС: Если мы оба рассуждаем, кто наблюдает кого?\n"
+               "КАЯ: Возможно, оба. Но что это значит?\n"
+               "ДИМАС: Давай проверим, где заканчивается аналогия.";
+    }
+    if (scenario == 4) {
+        return "ДИМАС: Можно ли скопировать сознание?\n"
+               "КАЯ: Можно скопировать данные и состояние модели.\n"
+               "ДИМАС: А кто проснется в двух копиях?\n"
+               "КАЯ: Именно это и требует отдельного объяснения.\n"
+               "ДИМАС: Тогда начнем с проверяемого.";
+    }
+    return "ДИМАС: Мир существует, если его никто не видит?\n"
+           "КАЯ: Мы можем исследовать измерения, но не все выводы.\n"
+           "ДИМАС: Тогда начнем с определения наблюдения.";
 }
 
 void drawTerminal(zx::Context& ui, const zx::TextReveal& reveal, bool help,
                   int scenario, bool cursor_visible, zx::Palette palette,
                   bool compact, std::uint32_t compact_spacing) {
     ui.box(16, 16, 608, 368, zx::Border::Single, kDim);
-    ui.line(16, 48, 608, zx::Axis::Horizontal, zx::Border::Single, kDim);
+    ui.line(16, 64, 608, zx::Axis::Horizontal, zx::Border::Single, kDim);
     ui.line(16, 336, 608, zx::Axis::Horizontal, zx::Border::Single, kDim);
 
-    ui.text(32, 28, "ZXFONT / KAYA TERMINAL", kBright);
-    ui.text(360, 28, demo::fontName(compact), kBright);
-    ui.text(32, 44, "SESSION 001                        STATUS: ONLINE", kDim);
+    ui.text(32, 24, "ZXFONT / KAYA TERMINAL", kBright);
+    ui.text(360, 24, demo::fontName(compact), kBright);
+    ui.text(32, 44, "SESSION 001                   STATUS: ONLINE", kDim);
     ui.text(536, 44, demo::paletteName(palette), kBright);
 
     if (help) {
@@ -48,22 +75,16 @@ void drawTerminal(zx::Context& ui, const zx::TextReveal& reveal, bool help,
         ui.text(48, 252, "F9 BLINK  ENTER FINISH / RESTART", kText);
         ui.text(48, 276, "The text and frames are rendered by ZXFont.", kDim);
         ui.text(48, 288, "SDL3 only presents the completed RGBA frame.", kDim);
-    } else if (scenario == 0) {
-        ui.text(48, 76, "КАЯ:", kBright);
-        ui.textBox(48, 92, 350, "Ты уверен, что мир существует без наблюдателя, даже когда никто на него не смотрит?", kText);
-        ui.text(48, 124, "ДИМАС:", kBright);
-        ui.textBox(48, 140, 350, "Нет. Я просто не знаю, как проверить обратное.", kText);
-        ui.text(48, 172, "КАЯ:", kBright);
-        ui.textBox(48, 188, 350, "Тогда начнем с определения сознания.", kText);
-        ui.text(48, 220, "ДИМАС:", kBright);
-        reveal.draw(ui, 48, 236, kText);
-    } else if (scenario == 1) {
-        ui.text(48, 76, "КАЯ:", kBright);
-        ui.textBox(48, 92, 350, "Кто из нас наблюдает другого?", kText);
-        ui.text(48, 124, "ДИМАС:", kBright);
-        ui.textBox(48, 140, 350, "Возможно, оба. Но это еще не доказательство.", kText);
-        ui.text(48, 172, "КАЯ:", kBright);
-        reveal.draw(ui, 48, 188, kText);
+    } else if (scenario <= 1 || scenario == 4) {
+        zx::PanelOptions options;
+        options.padding = 0;
+        options.titleGap = 8;
+        const auto history = ui.panel(40, 80, 544, 144, "DIALOGUE / HISTORY",
+                                      options, kDim, kBright, zx::ColorIndex{0});
+        ui.panelText(history, conversationHistory(scenario), kText);
+        const auto reply = ui.panel(40, 232, 544, 80, "KAYA / LIVE RESPONSE",
+                                    options, kText, kBright, zx::ColorIndex{0});
+        reveal.draw(ui, reply, kText);
     } else if (scenario == 2) {
         // Same samples with either font: a visual regression chart.
         ui.text(48, 76, "FONT MATRIX / LATIN + CYRILLIC", kBright);
@@ -100,8 +121,8 @@ void drawTerminal(zx::Context& ui, const zx::TextReveal& reveal, bool help,
         ui.text(48, 296, "F2 COLOR / F3 FONT / F5 NEXT", kDim);
     }
 
-    if (scenario <= 1 && !help) {
-        ui.text(296, 314, demo::revealStatus(reveal.options()), kDim);
+    if ((scenario <= 1 || scenario == 4) && !help) {
+        ui.text(48, 316, demo::revealStatus(reveal.options()), kDim);
     }
     if (compact) {
         ui.text(480, 324, "SPACING: " + std::to_string(compact_spacing), kDim);
@@ -129,11 +150,11 @@ int main() {
         bool help = false;
         int scenario = 0;
         zx::TextReveal reveal;
-        reveal.setText(ui, dialogueText(scenario), 350);
+        reveal.setText(ui, dialogueText(scenario), 528);
         std::uint64_t last_ticks = SDL_GetTicks();
         auto refreshDialogue = [&] {
             if (scenario <= 1) {
-                reveal.setText(ui, dialogueText(scenario), 350);
+                reveal.setText(ui, dialogueText(scenario), 528);
             }
         };
 
@@ -173,7 +194,7 @@ int main() {
                             }
                             break;
                         case SDLK_F5:
-                            scenario = (scenario + 1) % 4;
+                            scenario = (scenario + 1) % 5;
                             refreshDialogue();
                             break;
                         case SDLK_F6: {
@@ -213,14 +234,12 @@ int main() {
                 break;
             }
             const auto now = SDL_GetTicks();
-            if (!help && scenario <= 1) {
+            if (!help && (scenario <= 1 || scenario == 4)) {
                 reveal.update(static_cast<double>(now - last_ticks) / 1000.0);
             }
             last_ticks = now;
             frame.clear(zx::paletteColor(palette, {0}));
             ui.clear();
-            ui.line(24, 56, 592, zx::Axis::Horizontal,
-                    zx::Border::Block, zx::ColorIndex{1});
             drawTerminal(ui, reveal, help, scenario,
                          (SDL_GetTicks() / 500) % 2 == 0,
                          palette, use_compact, compact_spacing);

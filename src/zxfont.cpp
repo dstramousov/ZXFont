@@ -80,16 +80,20 @@ void drawGlyph(Surface target, std::uint32_t canvas_width,
                std::uint32_t canvas_height, std::int64_t x, std::int64_t y,
                const std::uint8_t* glyph, std::uint32_t glyph_width,
                std::uint32_t glyph_height, std::size_t bytes_per_row,
-               Color color) noexcept {
+               Color color, std::optional<PanelArea> clip = std::nullopt) noexcept {
     for (std::uint32_t row = 0; row < glyph_height; ++row) {
         const auto py = y + row;
-        if (py < 0 || py >= canvas_height) {
+        if (py < 0 || py >= canvas_height ||
+            (clip && (py < clip->y ||
+                      py >= static_cast<std::int64_t>(clip->y) + clip->height))) {
             continue;
         }
         const auto* row_bits = glyph + static_cast<std::size_t>(row) * bytes_per_row;
         for (std::uint32_t col = 0; col < glyph_width; ++col) {
             const auto px = x + col;
             if (px < 0 || px >= canvas_width ||
+                (clip && (px < clip->x ||
+                          px >= static_cast<std::int64_t>(clip->x) + clip->width)) ||
                 (row_bits[col / 8] & (0x80u >> (col % 8))) == 0) {
                 continue;
             }
@@ -380,12 +384,16 @@ char32_t borderGlyph(Border border, std::uint8_t mask) noexcept {
 void fillRectangle(Surface target, std::uint32_t canvas_width,
                    std::uint32_t canvas_height, std::int64_t x, std::int64_t y,
                    std::uint32_t width, std::uint32_t height,
-                   Color color) noexcept {
+                   Color color, std::optional<PanelArea> clip = std::nullopt) noexcept {
     if (color.a == 0) return;
-    const auto left = std::max<std::int64_t>(0, x);
-    const auto top = std::max<std::int64_t>(0, y);
-    const auto right = std::min<std::int64_t>(canvas_width, x + width);
-    const auto bottom = std::min<std::int64_t>(canvas_height, y + height);
+    const auto left = std::max<std::int64_t>(clip ? clip->x : 0, std::max<std::int64_t>(0, x));
+    const auto top = std::max<std::int64_t>(clip ? clip->y : 0, std::max<std::int64_t>(0, y));
+    const auto right = std::min<std::int64_t>(
+        clip ? static_cast<std::int64_t>(clip->x) + clip->width : canvas_width,
+        std::min<std::int64_t>(canvas_width, x + width));
+    const auto bottom = std::min<std::int64_t>(
+        clip ? static_cast<std::int64_t>(clip->y) + clip->height : canvas_height,
+        std::min<std::int64_t>(canvas_height, y + height));
     for (auto py = top; py < bottom; ++py) {
         for (auto px = left; px < right; ++px) {
             const auto offset = static_cast<std::size_t>(py) * target.stride_bytes +
@@ -393,6 +401,32 @@ void fillRectangle(Surface target, std::uint32_t canvas_width,
             blendPixel(target.pixels.data() + offset, color);
         }
     }
+}
+
+void validateAlign(TextAlign align) {
+    switch (align) {
+        case TextAlign::Left:
+        case TextAlign::Center:
+        case TextAlign::Right: return;
+    }
+    throw std::invalid_argument("Unknown text alignment");
+}
+
+int checkedCoordinate(std::int64_t value) {
+    if (value < std::numeric_limits<int>::min() ||
+        value > std::numeric_limits<int>::max()) {
+        throw std::overflow_error("Panel coordinate exceeds int range");
+    }
+    return static_cast<int>(value);
+}
+
+std::int64_t alignedX(const PanelArea& area, std::uint64_t line_width,
+                      TextAlign align) noexcept {
+    if (line_width >= area.width) return area.x;
+    const auto leftover = static_cast<std::int64_t>(area.width - line_width);
+    if (align == TextAlign::Center) return static_cast<std::int64_t>(area.x) + leftover / 2;
+    if (align == TextAlign::Right) return static_cast<std::int64_t>(area.x) + leftover;
+    return area.x;
 }
 
 }  // namespace
@@ -454,7 +488,7 @@ void Context::appendText(int x, int y, std::string_view value, Color color,
                          bool indexed, ColorIndex index) {
     auto decoded = decodeText(value, font_);
     commands_.push_back(TextCommand{x, y, std::move(decoded), color, font_,
-                                    letter_spacing_, indexed, index});
+                                    letter_spacing_, indexed, index, std::nullopt});
 }
 
 TextMetrics Context::measureText(std::string_view value,
@@ -483,7 +517,7 @@ void Context::appendBox(int x, int y, std::uint32_t max_width,
     auto laid_out = layoutText(decodeText(value, font_), font_,
                                letter_spacing_, max_width);
     commands_.push_back(TextCommand{x, y, std::move(laid_out.text), color,
-                                    font_, letter_spacing_, indexed, index});
+                                    font_, letter_spacing_, indexed, index, std::nullopt});
 }
 
 void Context::box(int x, int y, std::uint32_t width, std::uint32_t height,
@@ -530,6 +564,122 @@ void Context::line(int x, int y, std::uint32_t length, Axis axis,
     }
     commands_.emplace_back(LineCommand{x, y, length, axis, border, {},
                                        true, color});
+}
+
+PanelArea Context::panel(int x, int y, std::uint32_t width,
+                         std::uint32_t height, std::string_view title,
+                         PanelOptions options, Color border_color,
+                         Color title_color, std::optional<Color> fill) {
+    return appendPanel(x, y, width, height, title, options, border_color,
+                       title_color, false, ColorIndex{0}, ColorIndex{0},
+                       fill, std::nullopt);
+}
+
+PanelArea Context::panel(int x, int y, std::uint32_t width,
+                         std::uint32_t height, std::string_view title,
+                         PanelOptions options, ColorIndex border_color,
+                         ColorIndex title_color,
+                         std::optional<ColorIndex> fill) {
+    (void)paletteColor(palette_, border_color);
+    (void)paletteColor(palette_, title_color);
+    if (fill) (void)paletteColor(palette_, *fill);
+    return appendPanel(x, y, width, height, title, options, Color{},
+                       Color{}, true, border_color, title_color,
+                       std::nullopt, fill);
+}
+
+PanelArea Context::appendPanel(int x, int y, std::uint32_t width,
+                               std::uint32_t height, std::string_view title,
+                               PanelOptions options, Color border_color,
+                               Color title_color, bool indexed,
+                               ColorIndex border_index, ColorIndex title_index,
+                               std::optional<Color> fill,
+                               std::optional<ColorIndex> fill_index) {
+    validateBorder(options.border);
+    validateAlign(options.titleAlign);
+    if (width < 16 || height < 16 || width % 8 != 0 || height % 8 != 0) {
+        throw std::invalid_argument("Panel dimensions must be multiples of 8");
+    }
+    // Compute all geometry in 64 bits before mutating the command queue.
+    const std::uint64_t inset = 8ull + options.padding;
+    const auto text_width = static_cast<std::uint64_t>(width) > inset * 2
+        ? static_cast<std::uint64_t>(width) - inset * 2 : 0;
+    const auto text_height = static_cast<std::uint64_t>(height) > inset * 2
+        ? static_cast<std::uint64_t>(height) - inset * 2 : 0;
+    const auto glyph_width = font_.glyphWidth();
+    const auto glyph_height = font_.glyphHeight();
+    if (text_width < glyph_width || text_height < glyph_height) {
+        throw std::invalid_argument("Panel too small for the selected font");
+    }
+    const auto title_text = decodeText(title, font_);
+    if (title_text.find(U'\n') != std::u32string::npos) {
+        throw std::invalid_argument("Panel title must occupy one line");
+    }
+    const std::uint64_t reserved = title.empty() ? 0ull
+        : static_cast<std::uint64_t>(glyph_height) + options.titleGap;
+    if (text_height < reserved + glyph_height) {
+        throw std::invalid_argument("Panel too small for title and body");
+    }
+    const auto ax = checkedCoordinate(static_cast<std::int64_t>(x) + inset);
+    const auto ay = checkedCoordinate(static_cast<std::int64_t>(y) + inset);
+    const auto body_y = checkedCoordinate(static_cast<std::int64_t>(ay) + reserved);
+    PanelArea title_area{ax, ay, static_cast<std::uint32_t>(text_width), glyph_height};
+    PanelArea body_area{ax, body_y, static_cast<std::uint32_t>(text_width),
+                        static_cast<std::uint32_t>(text_height - reserved)};
+    const auto title_width = linePixels(title_text.size(), glyph_width, letter_spacing_);
+    const auto tx = checkedCoordinate(alignedX(title_area, title_width, options.titleAlign));
+    // Draw the panel first so that its optional fill remains behind title/body.
+    if (indexed) box(x, y, width, height, options.border, border_index, fill_index);
+    else box(x, y, width, height, options.border, border_color, fill);
+    if (!title_text.empty()) {
+        commands_.push_back(TextCommand{tx, ay, title_text, title_color,
+            font_, letter_spacing_, indexed, title_index, title_area});
+    }
+    return body_area;
+}
+
+void Context::panelText(PanelArea area, std::string_view value,
+                        Color color, TextAlign align) {
+    appendPanelText(area, value, color, false, ColorIndex{0}, align);
+}
+
+void Context::panelText(PanelArea area, std::string_view value,
+                        ColorIndex color, TextAlign align) {
+    (void)paletteColor(palette_, color);
+    appendPanelText(area, value, Color{}, true, color, align);
+}
+
+void Context::appendPanelText(PanelArea area, std::string_view value,
+                              Color color, bool indexed, ColorIndex index,
+                              TextAlign align) {
+    validateAlign(align);
+    if (area.width < font_.glyphWidth() || area.height == 0) {
+        throw std::invalid_argument("Panel interior is too small for text");
+    }
+    const auto layout = layoutText(decodeText(value, font_), font_,
+                                   letter_spacing_, area.width);
+    // Prepare all commands before appending for strong exception safety.
+    std::vector<TextCommand> prepared;
+    std::size_t start = 0;
+    std::uint64_t row = 0;
+    while (start < layout.text.size()) {
+        const auto end = layout.text.find(U'\n', start);
+        const auto stop = end == std::u32string::npos ? layout.text.size() : end;
+        const auto pos_y = static_cast<std::int64_t>(area.y) +
+                           static_cast<std::int64_t>(row) * font_.glyphHeight();
+        if (pos_y >= static_cast<std::int64_t>(area.y) + area.height) break;
+        const auto count = stop - start;
+        const auto pos_x = alignedX(area, linePixels(count, font_.glyphWidth(),
+                                                    letter_spacing_), align);
+        prepared.push_back(TextCommand{checkedCoordinate(pos_x),
+            checkedCoordinate(pos_y), layout.text.substr(start, count), color,
+            font_, letter_spacing_, indexed, index, area});
+        if (end == std::u32string::npos) break;
+        start = end + 1;
+        ++row;
+    }
+    commands_.reserve(commands_.size() + prepared.size());
+    for (auto& cmd : prepared) commands_.push_back(std::move(cmd));
 }
 
 void Context::clear() noexcept { commands_.clear(); }
@@ -618,7 +768,7 @@ void Context::render(Surface target) const {
         } else if (const auto* cursor = std::get_if<CursorCommand>(&command)) {
             fillRectangle(target, width_, height_, cursor->x, cursor->y,
                           cursor->width, cursor->height,
-                          paletteColor(palette_, cursor->color));
+                          paletteColor(palette_, cursor->color), cursor->clip);
         } else {
             const auto& text = std::get<TextCommand>(command);
             std::int64_t x = text.x;
@@ -638,7 +788,8 @@ void Context::render(Surface target) const {
                     y < height_ && y > -static_cast<std::int64_t>(glyph_height)) {
                     drawGlyph(target, width_, height_, x, y,
                               text.font.bitmap(codepoint), glyph_width,
-                              glyph_height, text.font.bytesPerRow(), color);
+                              glyph_height, text.font.bytesPerRow(), color,
+                              text.clip);
                 }
                 advance(x, glyph_width);
                 if (i + 1 < text.value.size() && text.value[i + 1] != U'\n') {
@@ -766,8 +917,18 @@ void TextReveal::draw(Context& context, int x, int y, ColorIndex color) const {
     queue(context, x, y, Color{}, true, color);
 }
 
+void TextReveal::draw(Context& context, PanelArea area, Color color) const {
+    queue(context, area.x, area.y, color, false, ColorIndex{0}, area);
+}
+
+void TextReveal::draw(Context& context, PanelArea area, ColorIndex color) const {
+    (void)paletteColor(context.palette_, color);
+    queue(context, area.x, area.y, Color{}, true, color, area);
+}
+
 void TextReveal::queue(Context& context, int x, int y, Color color,
-                       bool indexed, ColorIndex index) const {
+                       bool indexed, ColorIndex index,
+                       std::optional<PanelArea> clip) const {
     if (positions_.empty()) return;
     std::u32string text;
     text.reserve(laid_out_.size());
@@ -784,7 +945,7 @@ void TextReveal::queue(Context& context, int x, int y, Color color,
     }
     if (!text.empty()) {
         context.commands_.push_back(Context::TextCommand{
-            x, y, std::move(text), color, font_, spacing_, indexed, index});
+            x, y, std::move(text), color, font_, spacing_, indexed, index, clip});
     }
     if (!options_.cursorEnabled ||
         (finished() && !options_.cursorAfterComplete)) return;
@@ -808,7 +969,7 @@ void TextReveal::queue(Context& context, int x, int y, Color color,
     context.commands_.push_back(Context::CursorCommand{
         static_cast<std::int64_t>(x) + cursor_x,
         static_cast<std::int64_t>(y) + cursor_y,
-        gw, font_.glyphHeight(), options_.cursorColor});
+        gw, font_.glyphHeight(), options_.cursorColor, clip});
 }
 
 }  // namespace zx

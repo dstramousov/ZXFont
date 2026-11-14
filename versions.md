@@ -99,3 +99,12 @@
 - Drive reveal progression from elapsed real time rather than frame count.
 - Queue text and cursor through the existing Context RGBA renderer; no SDL3 dependency in core.
 - Demonstrate live tuning and skipping the effect in both Kaya and Mode256, with time/layout regression tests.
+
+## v0.0.13 -> v0.0.14
+
+- Add bounded panels with configurable border, padding, single-line title and title alignment; return the usable content rectangle.
+- Add wrapped panel text with per-line left/center/right alignment and exact pixel clipping, including partial glyph rows.
+- Support drawing animated text and its cursor within the same clipping rectangle.
+- Rework the Kaya dialogue into history and live-response panels and use panel layout in Mode256.
+- Replace the root README with a concise Russian overview, screenshot placeholders, integration guide and public API reference; keep version history only here.
+- Add panel geometry, alignment, clipping, palette and validation tests.
