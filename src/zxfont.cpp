@@ -3,6 +3,7 @@
 #include "utf8.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <limits>
 #include <unordered_map>
@@ -614,6 +615,10 @@ void Context::render(Surface target) const {
                          width_, height_, [&](auto x, auto y, auto, auto) {
                 drawStroke(x, y, line->border, color, index);
             });
+        } else if (const auto* cursor = std::get_if<CursorCommand>(&command)) {
+            fillRectangle(target, width_, height_, cursor->x, cursor->y,
+                          cursor->width, cursor->height,
+                          paletteColor(palette_, cursor->color));
         } else {
             const auto& text = std::get<TextCommand>(command);
             std::int64_t x = text.x;
@@ -642,6 +647,168 @@ void Context::render(Surface target) const {
             }
         }
     }
+}
+
+namespace {
+
+void validateRevealOptions(const RevealOptions& value) {
+    if (!std::isfinite(value.charsPerSecond) || value.charsPerSecond < 0 ||
+        !std::isfinite(value.cursorLead) || value.cursorLead < 0 ||
+        value.cursorLead > 1 || value.cursorColor.value > 15) {
+        throw std::invalid_argument("Invalid reveal options");
+    }
+}
+
+}  // namespace
+
+TextReveal::TextReveal(RevealOptions options) : options_(options) {
+    validateRevealOptions(options_);
+}
+
+void TextReveal::setText(const Context& context, std::string_view value,
+                         std::uint32_t max_width) {
+    if (max_width == 0) {
+        throw std::invalid_argument("Reveal width must be positive");
+    }
+    const auto decoded = decodeText(value, context.font_);
+    auto layout = layoutText(decoded, context.font_, context.letter_spacing_,
+                             max_width);
+    std::vector<std::pair<std::int64_t, std::int64_t>> positions;
+    positions.reserve(layout.text.size() + 1);
+    std::int64_t px = 0;
+    std::int64_t py = 0;
+    const auto gw = context.font_.glyphWidth();
+    const auto gh = context.font_.glyphHeight();
+    for (std::size_t i = 0; i < layout.text.size(); ++i) {
+        if (layout.text[i] == U'\n') {
+            px = 0;
+            advance(py, gh);
+            continue;
+        }
+        positions.emplace_back(px, py);
+        advance(px, gw);
+        if (i + 1 < layout.text.size() && layout.text[i + 1] != U'\n') {
+            advance(px, context.letter_spacing_);
+        }
+    }
+    positions.emplace_back(px, py);
+
+    // Commit only after complete validation and allocation succeeded.
+    laid_out_ = std::move(layout.text);
+    metrics_ = layout.metrics;
+    positions_ = std::move(positions);
+    font_ = context.font_;
+    spacing_ = context.letter_spacing_;
+    max_width_ = max_width;
+    reset();
+    if (options_.charsPerSecond == 0) finish();
+}
+
+void TextReveal::setOptions(RevealOptions options) {
+    validateRevealOptions(options);
+    options_ = options;
+    if (options_.charsPerSecond == 0) finish();
+}
+
+const RevealOptions& TextReveal::options() const noexcept { return options_; }
+
+void TextReveal::update(double elapsed_seconds) {
+    if (!std::isfinite(elapsed_seconds) || elapsed_seconds < 0) {
+        throw std::invalid_argument("Reveal time delta must be finite and nonnegative");
+    }
+    // Blink is driven by caller time too, regardless of typing progress.
+    constexpr double kBlinkPeriod = 1.0;
+    blink_phase_ = std::fmod(blink_phase_ +
+                            std::fmod(elapsed_seconds, kBlinkPeriod),
+                            kBlinkPeriod);
+    if (finished()) return;
+    if (options_.charsPerSecond == 0) {
+        finish();
+        return;
+    }
+    const double progressed = elapsed_seconds * options_.charsPerSecond;
+    const auto remaining = positions_.size() - 1 - visible_;
+    if (!std::isfinite(progressed) ||
+        progressed >= static_cast<double>(remaining) - fractional_) {
+        finish();
+        return;
+    }
+    const double accumulated = fractional_ + progressed;
+    const auto whole = static_cast<std::size_t>(std::floor(accumulated));
+    visible_ += whole;
+    fractional_ = accumulated - static_cast<double>(whole);
+}
+
+void TextReveal::reset() noexcept {
+    visible_ = 0;
+    fractional_ = 0.0;
+    blink_phase_ = 0.0;
+}
+
+void TextReveal::finish() noexcept {
+    visible_ = positions_.empty() ? 0 : positions_.size() - 1;
+    fractional_ = 0.0;
+}
+
+bool TextReveal::finished() const noexcept {
+    return positions_.empty() || visible_ >= positions_.size() - 1;
+}
+
+std::size_t TextReveal::visibleCharacters() const noexcept { return visible_; }
+TextMetrics TextReveal::metrics() const noexcept { return metrics_; }
+
+void TextReveal::draw(Context& context, int x, int y, Color color) const {
+    queue(context, x, y, color, false, ColorIndex{0});
+}
+
+void TextReveal::draw(Context& context, int x, int y, ColorIndex color) const {
+    (void)paletteColor(context.palette_, color);
+    queue(context, x, y, Color{}, true, color);
+}
+
+void TextReveal::queue(Context& context, int x, int y, Color color,
+                       bool indexed, ColorIndex index) const {
+    if (positions_.empty()) return;
+    std::u32string text;
+    text.reserve(laid_out_.size());
+    std::size_t copied = 0;
+    for (char32_t cp : laid_out_) {
+        if (cp == U'\n') {
+            if (copied < visible_) text.push_back(cp);
+        } else if (copied < visible_) {
+            text.push_back(cp);
+            ++copied;
+        } else {
+            break;
+        }
+    }
+    if (!text.empty()) {
+        context.commands_.push_back(Context::TextCommand{
+            x, y, std::move(text), color, font_, spacing_, indexed, index});
+    }
+    if (!options_.cursorEnabled ||
+        (finished() && !options_.cursorAfterComplete)) return;
+    if (options_.cursorBlink && blink_phase_ >= 0.5) return;
+    if (!finished() && fractional_ < 1.0 - options_.cursorLead) return;
+    const auto [at_x, at_y] = positions_[visible_];
+    std::int64_t cursor_x = at_x;
+    std::int64_t cursor_y = at_y;
+    const auto gw = font_.glyphWidth();
+    const bool start_of_line = visible_ == 0 ||
+        (visible_ > 0 && at_y != positions_[visible_ - 1].second);
+    if (finished() && cursor_x + gw > max_width_ && cursor_x != 0) {
+        // A completed line exactly fills the box: continue on the next row.
+        cursor_x = 0;
+        advance(cursor_y, font_.glyphHeight());
+    } else if (!start_of_line &&
+               cursor_x + gw + options_.cursorGapPx <= max_width_) {
+        // The requested gap must never push the block beyond the text box.
+        advance(cursor_x, options_.cursorGapPx);
+    }
+    context.commands_.push_back(Context::CursorCommand{
+        static_cast<std::int64_t>(x) + cursor_x,
+        static_cast<std::int64_t>(y) + cursor_y,
+        gw, font_.glyphHeight(), options_.cursorColor});
 }
 
 }  // namespace zx

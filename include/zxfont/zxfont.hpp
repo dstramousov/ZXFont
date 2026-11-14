@@ -2,6 +2,7 @@
 #define ZXFONT_ZXFONT_HPP
 
 #include <cstddef>
+#include <utility>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -107,6 +108,19 @@ struct TextMetrics {
     std::uint32_t height = 0;
     std::size_t lines = 0;
 };
+
+/** @brief Defaults for timed text reveal and its solid block cursor. */
+struct RevealOptions {
+    double charsPerSecond = 30.0;  // Zero reveals all text immediately.
+    bool cursorEnabled = true;
+    std::uint32_t cursorGapPx = 1;
+    double cursorLead = 0.4;  // Fraction of the interval before the next glyph.
+    bool cursorBlink = false;
+    bool cursorAfterComplete = true;
+    ColorIndex cursorColor{10};
+};
+
+class TextReveal;
 
 /**
  * @brief Stores text drawing commands for a logical pixel-sized canvas.
@@ -286,6 +300,14 @@ private:
         std::optional<ColorIndex> fill_index;
     };
 
+    struct CursorCommand {
+        std::int64_t x;
+        std::int64_t y;
+        std::uint32_t width;
+        std::uint32_t height;
+        ColorIndex color;
+    };
+
     struct LineCommand {
         int x;
         int y;
@@ -308,7 +330,83 @@ private:
     Font font_;
     std::uint32_t letter_spacing_ = 0;
     Palette palette_ = Palette::MonoGreen;
-    std::vector<std::variant<TextCommand, BoxCommand, LineCommand>> commands_;
+    std::vector<std::variant<TextCommand, BoxCommand, LineCommand, CursorCommand>> commands_;
+
+    friend class TextReveal;
+};
+
+
+/**
+ * @brief Time-driven UTF-8 text reveal independent of rendering and frame rate.
+ *
+ * setText() captures the current Context font, spacing, and fully wrapped
+ * layout. update() advances printable Unicode codepoints, never UTF-8 bytes.
+ * The caller owns time, the window, and the framebuffer. Each TextReveal has
+ * independent progress and options; the default constructor is ready to use.
+ */
+class TextReveal {
+public:
+    /** @brief Create a reveal with validated options and no text. */
+    explicit TextReveal(RevealOptions options = {});
+
+    /**
+     * @brief Prepare and reset a message using the current Context typography.
+     *
+     * The width must be nonzero. Changes to the Context font or spacing do not
+     * affect this message until setText() is called again.
+     * Invalid text and unsupported glyphs throw std::invalid_argument.
+     */
+    void setText(const Context& context, std::string_view value,
+                 std::uint32_t max_width);
+
+    /** @brief Set options without resetting already revealed characters. */
+    void setOptions(RevealOptions options);
+
+    /** @brief Return the current configuration. */
+    [[nodiscard]] const RevealOptions& options() const noexcept;
+
+    /**
+     * @brief Advance by elapsed real time in seconds (not frames).
+     *
+     * Rejects negative, NaN, or infinite time deltas. Speed zero is instant.
+     */
+    void update(double elapsed_seconds);
+
+    /** @brief Restart the prepared message without changing its layout. */
+    void reset() noexcept;
+
+    /** @brief Reveal the entire message immediately. */
+    void finish() noexcept;
+
+    /** @brief True when every printable glyph is visible. */
+    [[nodiscard]] bool finished() const noexcept;
+
+    /** @brief Number of revealed printable Unicode codepoints. */
+    [[nodiscard]] std::size_t visibleCharacters() const noexcept;
+
+    /** @brief Dimensions of the complete precomputed layout. */
+    [[nodiscard]] TextMetrics metrics() const noexcept;
+
+    /** @brief Queue visible text and an optional cursor with an RGBA text color. */
+    void draw(Context& context, int x, int y, Color color = {}) const;
+
+    /** @brief Queue visible text and an optional cursor with indexed text color. */
+    void draw(Context& context, int x, int y, ColorIndex color) const;
+
+private:
+    void queue(Context& context, int x, int y, Color color,
+               bool indexed, ColorIndex index) const;
+
+    RevealOptions options_;
+    Font font_;
+    std::uint32_t spacing_ = 0;
+    std::uint32_t max_width_ = 0;
+    std::u32string laid_out_;
+    TextMetrics metrics_;
+    std::vector<std::pair<std::int64_t, std::int64_t>> positions_;
+    std::size_t visible_ = 0;
+    double fractional_ = 0.0;
+    double blink_phase_ = 0.0;
 };
 
 }  // namespace zx

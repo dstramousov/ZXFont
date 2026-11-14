@@ -1,4 +1,5 @@
 #include "../examples/common/demo_support.hpp"
+#include "../examples/common/reveal_demo.hpp"
 #include "../examples/common/frame_layout.hpp"
 
 #include <cstddef>
@@ -7,6 +8,17 @@
 #include <cmath>
 
 int main() {
+    if (demo::nextTypingSpeed(30) != 60 ||
+        demo::nextTypingSpeed(120) != 0 ||
+        demo::nextTypingSpeed(0) != 10 ||
+        demo::nextCursorLead(0.4) != 0.5 ||
+        demo::nextCursorLead(0.5) != 1.0 ||
+        demo::nextCursorLead(1.0) != 0.25 ||
+        demo::revealStatus(zx::RevealOptions{}).find("CPS:30 GAP:1") ==
+            std::string::npos) {
+        std::cerr << "Reveal demo controls are inconsistent\n";
+        return 1;
+    }
     // Fullscreen and resizing must keep every edge of the logical frame visible.
     for (const auto& [out_w, out_h] : {
              std::pair{1920, 1080}, std::pair{1280, 800},

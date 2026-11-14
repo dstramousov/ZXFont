@@ -195,3 +195,19 @@ positions may be arbitrary, but to join, the 8x8 cell origins must coincide.
 A filled box covers its complete rectangle; queue text after the box to draw
 inside it. Text insets/padding remain the caller's responsibility, not a
 new widget system. See [API details](docs/API.md).
+
+### Typewriter effect and solid cursor (v0.0.13)
+
+Use `zx::TextReveal` for time-driven dialogue animation. The component has
+working defaults and an optional `RevealOptions` parameter. Call `setText`
+once to capture the fully wrapped message, then `update(delta_seconds)`
+and `draw(ui, x, y, color)` per frame. `finish()` reveals the whole message;
+`reset()` replays it. This uses the same `Context` framebuffer as ordinary
+text, with no dependency on SDL3 in the core library.
+
+In either visual demo, **F6** cycles typing speed 0/10/30/60/120 CPS,
+**F7** changes cursor gap 0..3 px, **F8** changes the pre-character cursor
+lead, **F9** toggles blinking and **Enter** finishes/restarts the animation.
+F2/F3/F4/F5/F11 retain their previous functions. The demonstrations apply
+animation only to dialogue text, not the static HUD or frame decorations.
+See [API](docs/API.md) for options, defaults and examples.

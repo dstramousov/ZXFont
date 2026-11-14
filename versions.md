@@ -91,3 +91,11 @@
 - Keep frame geometry on the embedded Spectrum Unicode 8x8 grid independently of selected 6x8 text and letter spacing.
 - Move Kaya and Mode256 demos from hand-built text frames and separate border contexts to the shared ZXFont primitives.
 - Add regression tests for junctions, fonts, colors, validation, and clipped geometry.
+
+## v0.0.12 -> v0.0.13
+
+- Add independent `TextReveal` with configurable speed, solid-block cursor lead/gap/blink, and instant mode.
+- Keep one precomputed UTF-8 layout per message, retaining font and spacing for stable word wraps.
+- Drive reveal progression from elapsed real time rather than frame count.
+- Queue text and cursor through the existing Context RGBA renderer; no SDL3 dependency in core.
+- Demonstrate live tuning and skipping the effect in both Kaya and Mode256, with time/layout regression tests.

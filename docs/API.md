@@ -214,3 +214,71 @@ ui.textBox(24, 160, 208, "Привет, Димас!", zx::ColorIndex{12});
 - `clear()` drops text and geometry commands, not the host framebuffer.
 
 SDL3 and any host-owned framebuffer remain outside the ZXFont core.
+
+## Timed dialogue and cursor (v0.0.13)
+
+`TextReveal` is an independent, frame-rate-independent component. Its default
+constructor is ready to use (30 Unicode codepoints/second, enabled green
+solid-block cursor, 1-pixel extra gap, 40% cursor lead). A zero speed means
+instantaneous reveal. Each instance stores its own state and settings.
+
+```cpp
+zx::Context ui(256, 192);
+zx::TextReveal line;
+line.setText(ui, "Привет, Кая! Как дела?", 208);
+
+// Once per frame; the host supplies measured elapsed seconds.
+line.update(delta_seconds);
+ui.clear();
+ui.box(8, 128, 240, 56, zx::Border::Single, zx::ColorIndex{12});
+line.draw(ui, 24, 152, zx::ColorIndex{15});
+ui.render(host_framebuffer);
+
+// To skip the reveal, call line.finish().
+// To replay with the captured layout, call line.reset().
+```
+
+`setText(context, value, max_width)` validates UTF-8 and the current font's
+glyph coverage, then captures a **complete, wrapped layout** including font and
+letter spacing. It restarts the animation. Later font/spacing changes on the
+context cannot move the queued text: call `setText` again to reflow in the
+new font. The text reveal never creates a window or owns the framebuffer.
+
+`RevealOptions` has sensible defaults and can be overridden per instance:
+
+```cpp
+zx::RevealOptions options;
+options.charsPerSecond = 25;      // 0: instant
+options.cursorEnabled = true;
+options.cursorGapPx = 2;          // Extra pixel distance from preceding glyph
+options.cursorLead = 0.5;        // Cursor visible in the last 50% of each interval
+options.cursorBlink = false;
+options.cursorAfterComplete = true;
+options.cursorColor = zx::ColorIndex{10};
+line.setOptions(options);         // Does not reset revealed text
+```
+
+The solid cursor is sized to the selected font's cell and uses the currently
+selected palette. The lead fraction governs *when* the cursor appears before
+each next glyph (0 means only after completion, 1 means throughout the
+interval). The gap is extra to the current letter spacing and does not shift
+text or change wrapping; it is omitted at the start of a wrapped line or
+when the extra gap would cross the box boundary. After completing a completely
+filled line, the cursor proceeds to the next row.
+Blink toggles every 0.5 seconds when enabled. The cursor can remain after
+the last glyph or disappear according to `cursorAfterComplete`. Explicit and
+automatic line breaks are not delayed, while printable Unicode codepoints
+(including spaces) consume one step. Layout normalization may discard spaces
+at wrap boundaries before the timed sequence is prepared.
+
+The caller passes a **measured elapsed time in seconds**, not a frame count.
+`update()` rejects negative and non-finite time deltas. Options are validated
+before being applied; `cursorLead` must be within [0, 1], color indices
+within [0, 15], and speed finite and non-negative. To distinguish an invalid
+external font from a missing glyph, use the established `Context::setFont`
+and `Font::hasGlyph` APIs, respectively.
+
+Both SDL3 demos use F6 (speed: 0/10/30/60/120 CPS), F7 (cursor gap 0..3 px),
+F8 (cursor lead 25/50/100%), F9 (blink) and Enter (finish/replay). These are
+demo controls, **not** core ZXFont hotkeys. Full frame CRT effects are outside
+the scope of the library and were not added.

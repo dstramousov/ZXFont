@@ -1,6 +1,8 @@
 #include "zxfont/zxfont.hpp"
 
 #include <array>
+#include <cmath>
+#include <limits>
 #include <algorithm>
 #include <cstdint>
 #include <span>
@@ -560,6 +562,196 @@ void testTextLayout() {
     require(throws<std::invalid_argument>([&] { (void)ui.measureText("A", 5); }));
 }
 
+
+void testTextReveal() {
+    constexpr std::size_t width = 96;
+    constexpr std::size_t height = 48;
+    auto render = [](const zx::Context& ui) {
+        std::array<std::uint8_t, width * height * 4> pixels{};
+        ui.render({pixels, width, height, width * 4});
+        return pixels;
+    };
+
+    zx::Context ui(width, height);
+    zx::RevealOptions options;
+    require(options.charsPerSecond == 30.0);
+    require(options.cursorEnabled && options.cursorGapPx == 1);
+    zx::TextReveal typed;
+    require(typed.finished() && typed.visibleCharacters() == 0);
+
+    options.charsPerSecond = 10.0;
+    options.cursorEnabled = false;
+    typed.setOptions(options);
+    typed.setText(ui, "Привет", 48);
+    require(typed.metrics().lines == 1 && typed.metrics().width == 48);
+    require(!typed.finished() && typed.visibleCharacters() == 0);
+    typed.update(0.25);
+    require(typed.visibleCharacters() == 2);
+    typed.draw(ui, 0, 0, zx::ColorIndex{12});
+    zx::Context expected(width, height);
+    expected.text(0, 0, "Пр", zx::ColorIndex{12});
+    require(render(ui) == render(expected));
+
+    // Changing speed preserves the revealed prefix and fractional progress.
+    options.charsPerSecond = 20.0;
+    typed.setOptions(options);
+    typed.update(0.025);
+    require(typed.visibleCharacters() == 3);
+    ui.clear();
+    typed.draw(ui, 0, 0, zx::ColorIndex{12});
+    expected.clear();
+    expected.text(0, 0, "При", zx::ColorIndex{12});
+    require(render(ui) == render(expected));
+    typed.finish();
+    require(typed.finished() && typed.visibleCharacters() == 6);
+    ui.clear();
+    typed.draw(ui, 0, 0, zx::ColorIndex{12});
+    expected.clear();
+    expected.text(0, 0, "Привет", zx::ColorIndex{12});
+    require(render(ui) == render(expected));
+    typed.reset();
+    require(!typed.finished() && typed.visibleCharacters() == 0);
+
+    // Full layout is fixed before revealing; a wrapped line's next cursor
+    // is drawn at the real start of the second line, not after the first.
+    zx::Context compact_ui(width, height);
+    compact_ui.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    compact_ui.setLetterSpacing(1);
+    options.charsPerSecond = 2;
+    options.cursorEnabled = true;
+    options.cursorLead = 1;
+    options.cursorGapPx = 2;
+    options.cursorBlink = false;
+    typed.setOptions(options);
+    typed.setText(compact_ui, "АБ ВГ", 20);
+    require(typed.metrics().lines == 2 && typed.metrics().height == 16);
+    typed.update(1.0);
+    require(typed.visibleCharacters() == 2);
+    typed.draw(compact_ui, 4, 4, zx::ColorIndex{12});
+    auto actual = render(compact_ui);
+    // Cursor on new line occupies 6x8, no extra gap at x=4.
+    auto at = offset(4, 12, width * 4);
+    auto cursor_color = zx::paletteColor(zx::Palette::MonoGreen, {10});
+    require(actual[at] == cursor_color.r &&
+            actual[at + 1] == cursor_color.g && actual[at + 3] == 255);
+    require(actual[offset(11, 12, width * 4) + 3] == 0);
+    // The prepared glyph widths are independent of later font changes.
+    compact_ui.clear();
+    compact_ui.setFont(zx::Font{});
+    compact_ui.setLetterSpacing(0);
+    typed.finish();
+    options.cursorAfterComplete = false;
+    typed.setOptions(options);
+    typed.draw(compact_ui, 4, 4, zx::ColorIndex{12});
+    zx::Context ref(width, height);
+    ref.setFont(zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH));
+    ref.setLetterSpacing(1);
+    ref.text(4, 4, "АБ\nВГ", zx::ColorIndex{12});
+    require(render(compact_ui) == render(ref));
+
+    // A cursor is a filled rectangle colored by the active palette.
+    zx::Context cursor_ui(width, height);
+    options.cursorAfterComplete = true;
+    options.cursorLead = 0.4;
+    options.cursorGapPx = 3;
+    options.charsPerSecond = 10;
+    typed.setOptions(options);
+    typed.setText(cursor_ui, "AB", 48);
+    typed.update(0.05);
+    typed.draw(cursor_ui, 0, 0);
+    require(render(cursor_ui)[offset(0, 0, width * 4) + 3] == 0);
+    typed.update(0.02); // Last 40% of interval: cursor now visible.
+    cursor_ui.clear();
+    typed.draw(cursor_ui, 0, 0);
+    require(render(cursor_ui)[offset(0, 0, width * 4) + 3] == 255);
+    typed.update(0.03); // The first glyph is now visible.
+    require(typed.visibleCharacters() == 1);
+    cursor_ui.clear();
+    typed.draw(cursor_ui, 0, 0);
+    require(render(cursor_ui)[offset(11, 0, width * 4) + 3] == 0);
+    // Lead threshold not reached, cursor temporarily disappears.
+    typed.update(0.07);
+    cursor_ui.clear();
+    typed.draw(cursor_ui, 0, 0);
+    require(render(cursor_ui)[offset(11, 0, width * 4) + 3] == 255);
+    cursor_ui.clear();
+    cursor_ui.setPalette(zx::Palette::VGA);
+    typed.draw(cursor_ui, 0, 0);
+    actual = render(cursor_ui);
+    require(actual[offset(11, 0, width * 4) + 0] ==
+            zx::paletteColor(zx::Palette::VGA, {10}).r);
+
+    // Blinking and post-completion cursor visibility are independently set.
+    options.cursorBlink = true;
+    options.cursorLead = 1;
+    typed.setOptions(options);
+    cursor_ui.clear();
+    typed.update(0.51);
+    typed.draw(cursor_ui, 0, 0);
+    // Already finished; blink is in the off phase.
+    require(render(cursor_ui)[offset(19, 0, width * 4) + 3] == 0);
+    options.cursorAfterComplete = false;
+    typed.setOptions(options);
+    cursor_ui.clear();
+    typed.draw(cursor_ui, 0, 0);
+    expected.clear();
+    expected.text(0, 0, "AB");
+    expected.setPalette(zx::Palette::VGA);
+    require(render(cursor_ui) == render(expected));
+
+    // The trailing cursor wraps after a completely filled last line.
+    zx::Context full_line(width, height);
+    zx::RevealOptions end_options;
+    end_options.charsPerSecond = 0;
+    end_options.cursorGapPx = 5;
+    end_options.cursorLead = 1;
+    zx::TextReveal completed(end_options);
+    completed.setText(full_line, "AB", 16);
+    require(completed.finished());
+    completed.draw(full_line, 0, 0);
+    const auto full_pixels = render(full_line);
+    require(full_pixels[offset(0, 8, width * 4) + 3] == 255);
+    require(full_pixels[offset(16, 0, width * 4) + 3] == 0);
+
+    // Gap is skipped when the extra pixels would cross the measured box.
+    end_options.charsPerSecond = 10;
+    completed.setOptions(end_options);
+    completed.setText(full_line, "AB", 16);
+    completed.update(0.1);
+    full_line.clear();
+    completed.draw(full_line, 0, 0);
+    const auto no_gap = render(full_line);
+    require(no_gap[offset(8, 0, width * 4) + 3] == 255);
+
+    // Zero CPS is instant; invalid options/deltas do not change state.
+    options.charsPerSecond = 0;
+    typed.setOptions(options);
+    typed.setText(cursor_ui, "Кая", 24);
+    require(typed.finished() && typed.visibleCharacters() == 3);
+    options.cursorLead = 1.01;
+    require(throws<std::invalid_argument>([&] { typed.setOptions(options); }));
+    require(typed.options().cursorLead == 1);
+    options.cursorLead = 0.4;
+    options.charsPerSecond = -1;
+    require(throws<std::invalid_argument>([&] { typed.setOptions(options); }));
+    options.charsPerSecond = std::numeric_limits<double>::quiet_NaN();
+    require(throws<std::invalid_argument>([&] { typed.setOptions(options); }));
+    options.charsPerSecond = 10;
+    options.cursorColor.value = 16;
+    require(throws<std::invalid_argument>([&] { typed.setOptions(options); }));
+    require(throws<std::invalid_argument>([&] { typed.update(-1); }));
+    require(throws<std::invalid_argument>([&] {
+        typed.update(std::numeric_limits<double>::infinity());
+    }));
+    require(throws<std::invalid_argument>([&] {
+        typed.setText(cursor_ui, "A", 0);
+    }));
+    require(throws<std::invalid_argument>([&] {
+        typed.setText(cursor_ui, "\xD0", 24);
+    }));
+    require(typed.finished() && typed.visibleCharacters() == 3);
+}
+
 void testPseudographics() {
     constexpr std::size_t width = 80;
     constexpr std::size_t height = 56;
@@ -731,5 +923,6 @@ int main() {
     testCompactFontAndFallback();
     testLetterSpacing();
     testTextLayout();
+    testTextReveal();
     testPseudographics();
 }

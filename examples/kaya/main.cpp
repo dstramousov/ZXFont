@@ -1,5 +1,6 @@
 #include "../common/demo_support.hpp"
 #include "../common/demo_fonts.hpp"
+#include "../common/reveal_demo.hpp"
 #include "../common/sdl_display.hpp"
 
 #include <SDL3/SDL.h>
@@ -17,7 +18,12 @@ constexpr zx::ColorIndex kText{12};
 constexpr zx::ColorIndex kDim{7};
 constexpr zx::ColorIndex kBright{15};
 
-void drawTerminal(zx::Context& ui, bool help,
+std::string_view dialogueText(int scenario) {
+    return scenario == 1 ? "Согласна. Проведем эксперимент."
+                         : "Хорошо. Но не подменяй факты гипотезами.";
+}
+
+void drawTerminal(zx::Context& ui, const zx::TextReveal& reveal, bool help,
                   int scenario, bool cursor_visible, zx::Palette palette,
                   bool compact, std::uint32_t compact_spacing) {
     ui.box(16, 16, 608, 368, zx::Border::Single, kDim);
@@ -38,8 +44,10 @@ void drawTerminal(zx::Context& ui, bool help,
         ui.text(48, 184, "F4   - COMPACT SPACING 0/1/2", kText);
         ui.text(48, 196, "F5   - CHANGE DIALOGUE", kText);
         ui.text(48, 208, "F11  - TOGGLE FULLSCREEN", kText);
-        ui.text(48, 240, "The text and frames are rendered by ZXFont.", kDim);
-        ui.text(48, 256, "SDL3 only presents the completed RGBA frame.", kDim);
+        ui.text(48, 240, "F6 SPEED  F7 CURSOR GAP  F8 LEAD", kText);
+        ui.text(48, 252, "F9 BLINK  ENTER FINISH / RESTART", kText);
+        ui.text(48, 276, "The text and frames are rendered by ZXFont.", kDim);
+        ui.text(48, 288, "SDL3 only presents the completed RGBA frame.", kDim);
     } else if (scenario == 0) {
         ui.text(48, 76, "КАЯ:", kBright);
         ui.textBox(48, 92, 350, "Ты уверен, что мир существует без наблюдателя, даже когда никто на него не смотрит?", kText);
@@ -48,14 +56,14 @@ void drawTerminal(zx::Context& ui, bool help,
         ui.text(48, 172, "КАЯ:", kBright);
         ui.textBox(48, 188, 350, "Тогда начнем с определения сознания.", kText);
         ui.text(48, 220, "ДИМАС:", kBright);
-        ui.textBox(48, 236, 350, "Хорошо. Но не подменяй факты гипотезами.", kText);
+        reveal.draw(ui, 48, 236, kText);
     } else if (scenario == 1) {
         ui.text(48, 76, "КАЯ:", kBright);
         ui.textBox(48, 92, 350, "Кто из нас наблюдает другого?", kText);
         ui.text(48, 124, "ДИМАС:", kBright);
         ui.textBox(48, 140, 350, "Возможно, оба. Но это еще не доказательство.", kText);
         ui.text(48, 172, "КАЯ:", kBright);
-        ui.textBox(48, 188, 350, "Согласна. Проведем эксперимент.", kText);
+        reveal.draw(ui, 48, 188, kText);
     } else if (scenario == 2) {
         // Same samples with either font: a visual regression chart.
         ui.text(48, 76, "FONT MATRIX / LATIN + CYRILLIC", kBright);
@@ -92,8 +100,11 @@ void drawTerminal(zx::Context& ui, bool help,
         ui.text(48, 296, "F2 COLOR / F3 FONT / F5 NEXT", kDim);
     }
 
+    if (scenario <= 1 && !help) {
+        ui.text(296, 314, demo::revealStatus(reveal.options()), kDim);
+    }
     if (compact) {
-        ui.text(480, 332, "SPACING: " + std::to_string(compact_spacing), kDim);
+        ui.text(480, 324, "SPACING: " + std::to_string(compact_spacing), kDim);
     }
     ui.text(40, 352, ">", kBright);
     if (cursor_visible) {
@@ -117,6 +128,14 @@ int main() {
         bool running = true;
         bool help = false;
         int scenario = 0;
+        zx::TextReveal reveal;
+        reveal.setText(ui, dialogueText(scenario), 350);
+        std::uint64_t last_ticks = SDL_GetTicks();
+        auto refreshDialogue = [&] {
+            if (scenario <= 1) {
+                reveal.setText(ui, dialogueText(scenario), 350);
+            }
+        };
 
         while (running) {
             SDL_Event event;
@@ -144,14 +163,47 @@ int main() {
                                     std::cerr << "Kaya font fallback: " << error << '\n';
                                 }
                             }
+                            refreshDialogue();
                             break;
                         case SDLK_F4:
                             if (use_compact) {
                                 compact_spacing = (compact_spacing + 1) % 3;
                                 ui.setLetterSpacing(compact_spacing);
+                                refreshDialogue();
                             }
                             break;
-                        case SDLK_F5: scenario = (scenario + 1) % 4; break;
+                        case SDLK_F5:
+                            scenario = (scenario + 1) % 4;
+                            refreshDialogue();
+                            break;
+                        case SDLK_F6: {
+                            auto opts = reveal.options();
+                            opts.charsPerSecond = demo::nextTypingSpeed(opts.charsPerSecond);
+                            reveal.setOptions(opts);
+                            break;
+                        }
+                        case SDLK_F7: {
+                            auto opts = reveal.options();
+                            opts.cursorGapPx = (opts.cursorGapPx + 1) % 4;
+                            reveal.setOptions(opts);
+                            break;
+                        }
+                        case SDLK_F8: {
+                            auto opts = reveal.options();
+                            opts.cursorLead = demo::nextCursorLead(opts.cursorLead);
+                            reveal.setOptions(opts);
+                            break;
+                        }
+                        case SDLK_F9: {
+                            auto opts = reveal.options();
+                            opts.cursorBlink = !opts.cursorBlink;
+                            reveal.setOptions(opts);
+                            break;
+                        }
+                        case SDLK_RETURN:
+                            if (reveal.finished()) reveal.reset();
+                            else reveal.finish();
+                            break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         default: break;
                     }
@@ -160,11 +212,17 @@ int main() {
             if (!running) {
                 break;
             }
+            const auto now = SDL_GetTicks();
+            if (!help && scenario <= 1) {
+                reveal.update(static_cast<double>(now - last_ticks) / 1000.0);
+            }
+            last_ticks = now;
             frame.clear(zx::paletteColor(palette, {0}));
             ui.clear();
             ui.line(24, 56, 592, zx::Axis::Horizontal,
                     zx::Border::Block, zx::ColorIndex{1});
-            drawTerminal(ui, help, scenario, (SDL_GetTicks() / 500) % 2 == 0,
+            drawTerminal(ui, reveal, help, scenario,
+                         (SDL_GetTicks() / 500) % 2 == 0,
                          palette, use_compact, compact_spacing);
             ui.render(frame.surface());
             display.present(frame.pixels());

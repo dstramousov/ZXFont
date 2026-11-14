@@ -1,5 +1,6 @@
 #include "../common/demo_support.hpp"
 #include "../common/demo_fonts.hpp"
+#include "../common/reveal_demo.hpp"
 #include "../common/sdl_display.hpp"
 
 #include <SDL3/SDL.h>
@@ -16,6 +17,14 @@ constexpr int kWidth = 256;
 constexpr int kHeight = 192;
 constexpr zx::ColorIndex kHud{15};
 constexpr zx::ColorIndex kPanel{12};
+
+std::string_view dialogueText(int scenario) {
+    switch (scenario) {
+        case 1: return "Я не знаю. Но готов это проверить.";
+        case 2: return "Главное - не путать гипотезу с фактом.";
+        default: return "Ты уверен, что мир реален без наблюдателя?";
+    }
+}
 
 void drawWorld(demo::Frame& frame, int hero_x) {
     // All of this scenery belongs to the host application, not ZXFont.
@@ -56,18 +65,22 @@ void drawWorld(demo::Frame& frame, int hero_x) {
     frame.rect(181, 130, 3, 6, {33, 41, 65, 255});
 }
 
-void drawUi(zx::Context& ui, bool help,
+void drawUi(zx::Context& ui, const zx::TextReveal& reveal, bool help,
             bool dialog, int scenario, zx::Palette palette, bool compact,
             std::uint32_t compact_spacing) {
     ui.text(8, 8, "HP: 100  LVL: 03", kHud);
     ui.text(176, 8, demo::paletteName(palette), kHud);
+    if (scenario <= 2 && !help) {
+        ui.text(8, 20, demo::revealStatus(reveal.options()), kHud);
+    }
     if (help) {
         ui.box(8, 128, 240, 56, zx::Border::Single, kPanel,
                zx::ColorIndex{0});
-        ui.text(24, 136, "F1 HELP  F5 NEXT", kPanel);
-        ui.text(24, 144, "SPACE HIDE DIALOG", kPanel);
-        ui.text(24, 152, "F2 COLOR F3 FONT", kPanel);
-        ui.text(24, 160, "F4 COMPACT GAP F11 FULL", kPanel);
+        ui.text(24, 136, "F1 HELP F5 NEXT F11 FULL", kPanel);
+        ui.text(24, 144, "F2 COLOR F3 FONT F4 SPACE", kPanel);
+        ui.text(24, 152, "F6 SPEED F7 GAP F8 LEAD", kPanel);
+        ui.text(24, 160, "F9 BLINK ENTER SKIP/REPLAY", kPanel);
+        ui.text(24, 168, "SPACE HIDE DIALOG", kPanel);
         return;
     }
     if (!dialog) {
@@ -105,16 +118,13 @@ void drawUi(zx::Context& ui, bool help,
            zx::ColorIndex{0});
     if (scenario == 0) {
         ui.text(24, 136, "КАЯ:", kHud);
-        ui.textBox(24, 152, 208,
-                   "Ты уверен, что мир реален без наблюдателя?", kPanel);
+        reveal.draw(ui, 24, 152, kPanel);
     } else if (scenario == 1) {
         ui.text(24, 136, "ДИМАС:", kHud);
-        ui.textBox(24, 152, 208,
-                   "Я не знаю. Но готов это проверить.", kPanel);
+        reveal.draw(ui, 24, 152, kPanel);
     } else {
         ui.text(24, 136, "КАЯ:", kHud);
-        ui.textBox(24, 152, 208,
-                   "Главное - не путать гипотезу с фактом.", kPanel);
+        reveal.draw(ui, 24, 152, kPanel);
     }
 }
 
@@ -135,6 +145,12 @@ int main() {
         bool dialog = true;
         int scenario = 0;
         int hero_x = 74;
+        zx::TextReveal reveal;
+        reveal.setText(ui, dialogueText(scenario), 208);
+        std::uint64_t last_ticks = SDL_GetTicks();
+        auto refreshDialogue = [&] {
+            if (scenario <= 2) reveal.setText(ui, dialogueText(scenario), 208);
+        };
 
         while (running) {
             SDL_Event event;
@@ -162,14 +178,47 @@ int main() {
                                     std::cerr << "Mode256 font fallback: " << error << '\n';
                                 }
                             }
+                            refreshDialogue();
                             break;
                         case SDLK_F4:
                             if (use_compact) {
                                 compact_spacing = (compact_spacing + 1) % 3;
                                 ui.setLetterSpacing(compact_spacing);
+                                refreshDialogue();
                             }
                             break;
-                        case SDLK_F5: scenario = (scenario + 1) % 5; break;
+                        case SDLK_F5:
+                            scenario = (scenario + 1) % 5;
+                            refreshDialogue();
+                            break;
+                        case SDLK_F6: {
+                            auto opts = reveal.options();
+                            opts.charsPerSecond = demo::nextTypingSpeed(opts.charsPerSecond);
+                            reveal.setOptions(opts);
+                            break;
+                        }
+                        case SDLK_F7: {
+                            auto opts = reveal.options();
+                            opts.cursorGapPx = (opts.cursorGapPx + 1) % 4;
+                            reveal.setOptions(opts);
+                            break;
+                        }
+                        case SDLK_F8: {
+                            auto opts = reveal.options();
+                            opts.cursorLead = demo::nextCursorLead(opts.cursorLead);
+                            reveal.setOptions(opts);
+                            break;
+                        }
+                        case SDLK_F9: {
+                            auto opts = reveal.options();
+                            opts.cursorBlink = !opts.cursorBlink;
+                            reveal.setOptions(opts);
+                            break;
+                        }
+                        case SDLK_RETURN:
+                            if (reveal.finished()) reveal.reset();
+                            else reveal.finish();
+                            break;
                         case SDLK_F11: display.toggleFullscreen(); break;
                         case SDLK_SPACE: dialog = !dialog; break;
                         default: break;
@@ -184,10 +233,15 @@ int main() {
             hero_x = std::clamp(hero_x + static_cast<int>(right) -
                                 static_cast<int>(left), 8, 157);
 
+            const auto now = SDL_GetTicks();
+            if (!help && dialog && scenario <= 2) {
+                reveal.update(static_cast<double>(now - last_ticks) / 1000.0);
+            }
+            last_ticks = now;
             drawWorld(frame, hero_x);
             // Compose ZXFont directly over the host-owned game framebuffer.
             ui.clear();
-            drawUi(ui, help, dialog, scenario, palette, use_compact,
+            drawUi(ui, reveal, help, dialog, scenario, palette, use_compact,
                    compact_spacing);
             ui.render(frame.surface());
             display.present(frame.pixels());
