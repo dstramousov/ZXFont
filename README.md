@@ -77,10 +77,13 @@ ui.render({pixels, 256, 192, 256 * 4});
 | `text(x, y, text, color)` | Вывести UTF-8 текст с поддержкой `\n`. |
 | `measureText(text, maxWidth)` | Получить ширину, высоту и число строк после переноса. `maxWidth=0` — без переноса. |
 | `textBox(x, y, width, text, color)` | Вывести текст с переносом по словам в заданной ширине. |
+| `styledText(x, y, StyledText)` | Вывести разноцветные фрагменты без автоматического переноса. |
+| `styledTextBox(x, y, width, StyledText)` | Перенести форматированный текст по словам, не разрывая стили. |
 | `box(x, y, w, h, border, color, fill)` | Нарисовать одинарную, двойную или сплошную рамку с необязательной заливкой. |
 | `line(x, y, length, axis, border, color)` | Провести линию; совместимые стыки с рамками соединяются автоматически. |
 | `panel(x, y, w, h, title, options, borderColor, titleColor, fill)` | Нарисовать панель и заголовок, вернуть свободную область `PanelArea`. |
 | `panelText(area, text, color, align)` | Перенести, выровнять и обрезать текст внутри области панели. |
+| `panelStyledText(area, StyledText, align)` | То же для форматированного текста с фоном и подчёркиванием. |
 | `TextViewport::configure(reveal, area)` | Настроить видимую область для уже подготовленного текста без повторного переноса строк. |
 | `TextViewport::scrollLines(n)` | Прокрутить на `n` строк (отрицательное число — вверх). |
 | `TextViewport::pageUp()`, `pageDown()` | Прокрутить на одну страницу. |
@@ -112,12 +115,39 @@ ui.panelText(area, "Привет. Как прошёл день?", zx::ColorIndex
 
 Варианты `TextAlign`: `Left`, `Center`, `Right`. Заголовок занимает одну строку. Текст и курсор, выведенные в `PanelArea`, обрезаются по её границам. Сама `PanelArea` задаёт только границы. Прокрутка включается отдельно через `TextViewport`.
 
+### Цветные фрагменты и выделение
+
+`StyledText` собирается из частей методом `add(text, color)` или `add(text, TextStyle)`. Внутри одного слова можно менять цвет — это не создаёт пробелов и не ломает переносы. Для цвета подходят и `ColorIndex{0..15}`, и `Color{r,g,b,a}`.
+
+```cpp
+zx::StyledText message;
+message.add("КАЯ: ", zx::ColorIndex{15});
+
+zx::TextStyle accent;
+accent.foreground = zx::ColorIndex{10};
+accent.background = zx::ColorIndex{1};   // Необязательный фон символов.
+accent.underline = true;                // Подчёркивание (1 пиксель).
+message.add("Важное сообщение", accent);
+message.add(". Обычный текст.", zx::ColorIndex{12});
+
+ui.panelStyledText(area, message);      // Перенос, выравнивание, обрезка.
+// Или: ui.styledText(8, 8, message);
+// Или: ui.styledTextBox(8, 8, 180, message);
+
+zx::TextReveal typing;
+typing.setStyledText(ui, message, area.width);
+// update(), draw() и TextViewport работают как с обычным текстом.
+```
+
+`TextStyle::inverse = true` меняет местами цвет букв и фона. Если фон не задан, используется цвет с индексом `0`. Индексные цвета меняются вместе с палитрой даже у уже поставленных в очередь команд. Подчёркивание и фон не выходят за границы `PanelArea`. Обычный `text()` и `setText()` остаются без изменений.
+
 ### Печатная машинка и курсор
 
 | API | Для чего нужен |
 | --- | --- |
 | `TextReveal(options = {})` | Создать независимую анимацию текста со стандартными настройками. |
 | `setText(context, text, width)` | Запомнить текст и рассчитанные переносы; начать заново. |
+| `setStyledText(context, StyledText, width)` | Подготовить анимацию форматированного текста со всеми цветами. |
 | `update(seconds)` | Продвинуть печать на прошедшее время, независимо от FPS. |
 | `draw(context, x, y, color)` | Добавить видимый текст и курсор в очередь. |
 | `draw(context, PanelArea, color)` | То же, но с обрезкой по области панели. |

@@ -129,6 +129,44 @@ struct TextMetrics {
     std::size_t lines = 0;
 };
 
+/** @brief A color that may be explicit RGBA or resolved via the active palette. */
+using TextColor = std::variant<Color, ColorIndex>;
+
+/** @brief Appearance of one text fragment. Indexed colors follow setPalette(). */
+struct TextStyle {
+    TextColor foreground = ColorIndex{15};
+    std::optional<TextColor> background;
+    bool underline = false;
+    bool inverse = false; // Swap foreground and background; missing background is palette index 0.
+};
+
+/** @brief Text fragments with independent colors and decoration. */
+class StyledText {
+public:
+    /** @brief Append UTF-8 text using a complete style. */
+    StyledText& add(std::string_view text, TextStyle style = {});
+    /** @brief Append with an indexed foreground. */
+    StyledText& add(std::string_view text, ColorIndex color);
+    /** @brief Append with an explicit RGBA foreground. */
+    StyledText& add(std::string_view text, Color color);
+    /** @brief Remove all text fragments. */
+    void clear() noexcept;
+    /** @brief True if no nonempty fragments were added. */
+    [[nodiscard]] bool empty() const noexcept;
+
+    /** @brief Read-only fragments for adapters and custom renderers. */
+    struct Fragment {
+        std::string text;
+        TextStyle style;
+    };
+    [[nodiscard]] const std::vector<Fragment>& fragments() const noexcept;
+
+private:
+    std::vector<Fragment> fragments_;
+    friend class Context;
+    friend class TextReveal;
+};
+
 /** @brief Defaults for timed text reveal and its solid block cursor. */
 struct RevealOptions {
     double charsPerSecond = 30.0;  // Zero reveals all text immediately.
@@ -372,6 +410,17 @@ public:
     void panelText(PanelArea area, std::string_view value,
                    ColorIndex color, TextAlign align = TextAlign::Left);
 
+    /** @brief Queue styled UTF-8 text without wrapping. */
+    void styledText(int x, int y, const StyledText& value);
+
+    /** @brief Queue styled text with the same wrapping rules as textBox(). */
+    void styledTextBox(int x, int y, std::uint32_t max_width,
+                       const StyledText& value);
+
+    /** @brief Wrap, align and clip styled text inside a panel. */
+    void panelStyledText(PanelArea area, const StyledText& value,
+                         TextAlign align = TextAlign::Left);
+
     /** @brief Remove all queued drawing commands without changing any pixels. */
     void clear() noexcept;
 
@@ -398,6 +447,7 @@ private:
         bool indexed = false;
         ColorIndex index{0};
         std::optional<PanelArea> clip;
+        std::vector<TextStyle> styles{}; // Empty means legacy uniform-color rendering.
     };
 
     struct BoxCommand {
@@ -448,6 +498,10 @@ private:
                                          std::optional<ColorIndex> fill_index);
     void appendPanelText(PanelArea area, std::string_view value, Color color,
                          bool indexed, ColorIndex index, TextAlign align);
+    void appendStyled(int x, int y, std::uint32_t max_width,
+                      const StyledText& value,
+                      std::optional<PanelArea> clip = std::nullopt,
+                      TextAlign align = TextAlign::Left);
 
     std::uint32_t width_;
     std::uint32_t height_;
@@ -482,6 +536,10 @@ public:
      */
     void setText(const Context& context, std::string_view value,
                  std::uint32_t max_width);
+
+    /** @brief Prepare styled text; styles survive wrapping, reveal and scrolling. */
+    void setStyledText(const Context& context, const StyledText& value,
+                       std::uint32_t max_width);
 
     /** @brief Set options without resetting already revealed characters. */
     void setOptions(RevealOptions options);
@@ -552,12 +610,15 @@ private:
     void queue(Context& context, int x, int y, Color color,
                bool indexed, ColorIndex index,
                std::optional<PanelArea> clip = std::nullopt) const;
+    void prepare(const Context& context, std::u32string decoded,
+                 std::vector<TextStyle> styles, std::uint32_t max_width);
 
     RevealOptions options_;
     Font font_;
     std::uint32_t spacing_ = 0;
     std::uint32_t max_width_ = 0;
     std::u32string laid_out_;
+    std::vector<TextStyle> styles_; // Aligned with laid_out_, including synthetic LF.
     std::vector<LaidOutLine> lines_;
     TextMetrics metrics_;
     std::vector<std::pair<std::int64_t, std::int64_t>> positions_;

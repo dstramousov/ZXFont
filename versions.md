@@ -116,3 +116,12 @@
 - Suspend auto-follow on manual navigation and resume it with End; keep the animated cursor clipped to its viewport.
 - Add independent history/reply navigation in Kaya (Tab switches the active panel) and page scrolling for Mode256 dialogue without changing movement controls.
 - Extend pixel tests, long-history tests, the README API reference, and detailed API documentation.
+
+## v0.0.15 -> v0.0.16
+
+- Add `StyledText` fragments with independent indexed or RGBA foreground and optional background, underline and inverse video.
+- Keep rich-text word wrapping continuous across fragment boundaries; preserve glyph styles through `TextReveal` and `TextViewport` without re-layout during scrolling.
+- Support `Context::styledText()`, `styledTextBox()`, `panelStyledText()` and `TextReveal::setStyledText()`; leave plain-text API unchanged.
+- Resolve indexed foreground/background at render time so palettes remain switchable; clip backgrounds and underlines to panels.
+- Highlight dialogue speakers and key phrases in Kaya and Mode256; cover wrapping, blending, validation, cursor, palette and viewport behavior with tests.
+- Update the root README API reference and `docs/API.md` without duplicating the version log in README.

@@ -1,4 +1,4 @@
-# ZXFont Core API (v0.0.15)
+# ZXFont Core API (v0.0.16)
 
 A compact bitmap text API. The application owns its framebuffer and the window.
 ZXFont does not depend on SDL3 or create display resources.
@@ -380,3 +380,30 @@ Kaya uses `Tab` to choose the history or live response viewport, arrows for
 single lines, PageUp/PageDown for pages, and Home/End. Mode256 binds its
 PageUp/PageDown and Home/End to dialogue scrolling, leaving arrows to the
 simulated game movement. Both demos supply long dialogue examples via F5.
+
+## Rich text (v0.0.16)
+
+`zx::StyledText` contains UTF-8 fragments with per-fragment `zx::TextStyle`. Fragment boundaries are not spaces or newlines; the same word-wrap algorithm processes the concatenated input. The font and letter spacing are snapped when a draw command or reveal layout is prepared.
+
+```cpp
+zx::StyledText message;
+message.add("KAYA: ", zx::ColorIndex{15});
+zx::TextStyle emphasis;
+emphasis.foreground = zx::ColorIndex{10};
+emphasis.background = zx::ColorIndex{1};
+emphasis.underline = true;
+message.add("important", emphasis);
+message.add(" text", zx::Color{220, 200, 160, 255});
+
+ui.styledText(8, 8, message);                 // Unwrapped, preserves spaces and LF.
+ui.styledTextBox(8, 16, 180, message);        // Wrap at words, across spans.
+ui.panelStyledText(area, message);           // Wrap, align, clip by panel.
+reply.setStyledText(ui, message, area.width); // Timed reveal with per-glyph style.
+reply.draw(ui, viewport);                    // Scrolled rendering preserves style.
+```
+
+- `StyledText::add(text, style/index/RGBA)` appends a fragment; `clear()`, `empty()` and `fragments()` manage/query it. `TextStyle::foreground` is a `TextColor` (`std::variant<Color, ColorIndex>`). `background` is an optional `TextColor`.
+- `underline` draws a one-pixel line along the last glyph row; `inverse` swaps foreground/background. Missing background in inverse mode uses palette index 0.
+- Backgrounds cover glyph cells, including spaces, and follow alpha blending. Indexed colors are resolved at `render()` time; explicit RGBA colors stay fixed.
+- Unsupported glyphs, malformed UTF-8, and out-of-range indexed colors are rejected. Changing font requires new `setStyledText()`/`configure()` calls, just like plain text.
+- Styles survive word wrapping and dropped separator spaces. `TextReveal::visibleCharacters()` still counts Unicode codepoints rather than UTF-8 bytes; viewport paints only visible rows. The `color` argument of `TextReveal::draw()` is ignored for a styled message (colors come from the fragments); its cursor still uses `RevealOptions::cursorColor`.

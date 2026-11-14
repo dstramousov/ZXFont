@@ -1,6 +1,7 @@
 #include "../common/demo_support.hpp"
 #include "../common/demo_fonts.hpp"
 #include "../common/reveal_demo.hpp"
+#include "../common/styled_demo.hpp"
 #include "../common/sdl_display.hpp"
 
 #include <SDL3/SDL.h>
@@ -196,10 +197,12 @@ int main() {
             const auto replyArea = ui.panel(40, 232, 544, 80,
                 "KAYA / LIVE RESPONSE", options);
             ui.clear();
-            historyText.setText(ui, conversationHistory(scenario), historyArea.width);
+            historyText.setStyledText(ui, demo::styledConversation(conversationHistory(scenario)),
+                                      historyArea.width);
             historyView.configure(historyText, historyArea);
             historyView.home();
-            reveal.setText(ui, dialogueText(scenario), replyArea.width);
+            reveal.setStyledText(ui, demo::styledReply(dialogueText(scenario)),
+                                 replyArea.width);
             replyView.configure(reveal, replyArea);
             replyView.reset();
         };

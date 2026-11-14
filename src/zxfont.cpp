@@ -139,10 +139,12 @@ std::uint64_t linePixels(std::size_t count, std::uint32_t glyph_width,
 struct LayoutResult {
     std::u32string text;
     TextMetrics metrics;
+    std::vector<std::size_t> source_indices;
 };
 
 LayoutResult layoutText(const std::u32string& input, const Font& font,
-                        std::uint32_t spacing, std::uint32_t max_width) {
+                        std::uint32_t spacing, std::uint32_t max_width,
+                        bool capture_sources = false) {
     const auto gw = font.glyphWidth();
     const auto gh = font.glyphHeight();
     if (max_width != 0 && max_width < gw) {
@@ -151,8 +153,23 @@ LayoutResult layoutText(const std::u32string& input, const Font& font,
     if (input.empty()) return {};
 
     std::vector<std::u32string> lines;
+    std::vector<std::vector<std::size_t>> line_sources;
     std::u32string line;
-    auto emit = [&] { lines.push_back(std::move(line)); line.clear(); };
+    std::vector<std::size_t> sources;
+    auto emit = [&] {
+        lines.push_back(std::move(line));
+        line.clear();
+        if (capture_sources) {
+            line_sources.push_back(std::move(sources));
+            sources.clear();
+        }
+    };
+    auto trim = [&] {
+        while (!line.empty() && line.back() == U' ') {
+            line.pop_back();
+            if (capture_sources) sources.pop_back();
+        }
+    };
     auto fits = [&](std::size_t count) {
         return max_width == 0 || linePixels(count, gw, spacing) <= max_width;
     };
@@ -172,6 +189,9 @@ LayoutResult layoutText(const std::u32string& input, const Font& font,
                 const auto amount = i - begin;
                 if (fits(line.size() + amount)) {
                     line.append(amount, U' ');
+                    if (capture_sources) {
+                        for (std::size_t n = 0; n < amount; ++n) sources.push_back(begin + n);
+                    }
                 } else {
                     emit();
                 }
@@ -183,15 +203,17 @@ LayoutResult layoutText(const std::u32string& input, const Font& font,
         const auto word = input.substr(begin, i - begin);
         if (!line.empty() && !fits(line.size() + word.size())) {
             // Drop pending trailing separators on wrapped lines.
-            while (!line.empty() && line.back() == U' ') line.pop_back();
+            trim();
             if (!line.empty()) emit();
         }
-        for (const auto cp : word) {
+        for (std::size_t j = 0; j < word.size(); ++j) {
+            const auto cp = word[j];
             if (!fits(line.size() + 1)) {
-                while (!line.empty() && line.back() == U' ') line.pop_back();
+                trim();
                 if (!line.empty()) emit();
             }
             line.push_back(cp);
+            if (capture_sources) sources.push_back(begin + j);
         }
     }
     emit();
@@ -201,8 +223,13 @@ LayoutResult layoutText(const std::u32string& input, const Font& font,
     std::uint64_t widest = 0;
     for (std::size_t n = 0; n < lines.size(); ++n) {
         widest = std::max(widest, linePixels(lines[n].size(), gw, spacing));
-        if (n != 0) result.text.push_back(U'\n');
+        if (n != 0) {
+            result.text.push_back(U'\n');
+            if (capture_sources) result.source_indices.push_back(input.size());
+        }
         result.text += lines[n];
+        if (capture_sources) result.source_indices.insert(
+            result.source_indices.end(), line_sources[n].begin(), line_sources[n].end());
     }
     const std::uint64_t height = static_cast<std::uint64_t>(lines.size()) * gh;
     if (widest > std::numeric_limits<std::uint32_t>::max() ||
@@ -211,6 +238,32 @@ LayoutResult layoutText(const std::u32string& input, const Font& font,
     }
     result.metrics.width = static_cast<std::uint32_t>(widest);
     result.metrics.height = static_cast<std::uint32_t>(height);
+    return result;
+}
+
+void validateTextStyle(const TextStyle& style) {
+    auto validate = [](const TextColor& color) {
+        if (const auto* index = std::get_if<ColorIndex>(&color)) {
+            if (index->value >= 16) throw std::out_of_range("Text color index outside [0, 15]");
+        }
+    };
+    validate(style.foreground);
+    if (style.background) validate(*style.background);
+}
+
+struct DecodedStyled {
+    std::u32string text;
+    std::vector<TextStyle> styles;
+};
+
+DecodedStyled decodeStyled(const StyledText& value, const Font& font) {
+    DecodedStyled result;
+    for (const auto& fragment : value.fragments()) {
+        validateTextStyle(fragment.style);
+        auto decoded = decodeText(fragment.text, font);
+        result.styles.insert(result.styles.end(), decoded.size(), fragment.style);
+        result.text += decoded;
+    }
     return result;
 }
 
@@ -430,6 +483,27 @@ std::int64_t alignedX(const PanelArea& area, std::uint64_t line_width,
 }
 
 }  // namespace
+
+StyledText& StyledText::add(std::string_view text, TextStyle style) {
+    validateTextStyle(style);
+    if (!text.empty()) fragments_.push_back({std::string(text), std::move(style)});
+    return *this;
+}
+StyledText& StyledText::add(std::string_view text, ColorIndex color) {
+    TextStyle style;
+    style.foreground = color;
+    return add(text, style);
+}
+StyledText& StyledText::add(std::string_view text, Color color) {
+    TextStyle style;
+    style.foreground = color;
+    return add(text, style);
+}
+void StyledText::clear() noexcept { fragments_.clear(); }
+bool StyledText::empty() const noexcept { return fragments_.empty(); }
+const std::vector<StyledText::Fragment>& StyledText::fragments() const noexcept {
+    return fragments_;
+}
 
 Context::Context(std::uint32_t width, std::uint32_t height)
     : width_(width), height_(height) {
@@ -682,6 +756,77 @@ void Context::appendPanelText(PanelArea area, std::string_view value,
     for (auto& cmd : prepared) commands_.push_back(std::move(cmd));
 }
 
+void Context::styledText(int x, int y, const StyledText& value) {
+    appendStyled(x, y, 0, value);
+}
+void Context::styledTextBox(int x, int y, std::uint32_t max_width,
+                            const StyledText& value) {
+    if (max_width == 0) throw std::invalid_argument("Styled text box width must be nonzero");
+    appendStyled(x, y, max_width, value);
+}
+void Context::panelStyledText(PanelArea area, const StyledText& value,
+                              TextAlign align) {
+    if (area.width < font_.glyphWidth() || area.height == 0) {
+        throw std::invalid_argument("Panel area is too small for styled text");
+    }
+    appendStyled(area.x, area.y, area.width, value, area, align);
+}
+void Context::appendStyled(int x, int y, std::uint32_t max_width,
+                           const StyledText& value, std::optional<PanelArea> clip,
+                           TextAlign align) {
+    validateAlign(align);
+    auto decoded = decodeStyled(value, font_);
+    LayoutResult layout;
+    if (max_width == 0) {
+        // Unwrapped styledText() retains leading/trailing spaces, like text().
+        layout.text = std::move(decoded.text);
+        layout.source_indices.reserve(layout.text.size());
+        for (std::size_t i = 0; i < layout.text.size(); ++i) {
+            layout.source_indices.push_back(i);
+        }
+    } else {
+        layout = layoutText(decoded.text, font_, letter_spacing_, max_width, true);
+    }
+    std::vector<TextStyle> laid_styles;
+    laid_styles.reserve(layout.text.size());
+    for (const auto source : layout.source_indices) {
+        laid_styles.push_back(source == decoded.styles.size()
+                                  ? TextStyle{} : decoded.styles.at(source));
+    }
+    if (!clip) {
+        commands_.push_back(TextCommand{x, y, layout.text, Color{}, font_,
+            letter_spacing_, false, ColorIndex{0}, std::nullopt,
+            std::move(laid_styles)});
+        return;
+    }
+    const auto gh = font_.glyphHeight();
+    std::size_t begin = 0;
+    std::size_t line_num = 0;
+    std::vector<TextCommand> prepared;
+    while (begin < layout.text.size()) {
+        const auto end = layout.text.find(U'\n', begin);
+        const auto stop = end == std::u32string::npos ? layout.text.size() : end;
+        const auto py = static_cast<std::int64_t>(y) +
+                        static_cast<std::int64_t>(line_num) * gh;
+        if (py >= static_cast<std::int64_t>(clip->y) + clip->height) break;
+        const auto count = stop - begin;
+        if (count != 0 && py + gh > clip->y) {
+            const auto line_width = linePixels(count, font_.glyphWidth(), letter_spacing_);
+            const auto px = alignedX(*clip, line_width, align);
+            prepared.push_back(TextCommand{checkedCoordinate(px), checkedCoordinate(py),
+                layout.text.substr(begin, count), Color{}, font_, letter_spacing_,
+                false, ColorIndex{0}, clip,
+                {laid_styles.begin() + static_cast<std::ptrdiff_t>(begin),
+                 laid_styles.begin() + static_cast<std::ptrdiff_t>(stop)}});
+        }
+        if (end == std::u32string::npos) break;
+        begin = end + 1;
+        ++line_num;
+    }
+    commands_.reserve(commands_.size() + prepared.size());
+    for (auto& command : prepared) commands_.push_back(std::move(command));
+}
+
 void Context::clear() noexcept { commands_.clear(); }
 
 void Context::render(Surface target) const {
@@ -775,6 +920,10 @@ void Context::render(Surface target) const {
             std::int64_t y = text.y;
             const auto color = text.indexed ? paletteColor(palette_, text.index)
                                             : text.color;
+            const auto resolve = [&](const TextColor& value) -> Color {
+                if (const auto* direct = std::get_if<Color>(&value)) return *direct;
+                return paletteColor(palette_, std::get<ColorIndex>(value));
+            };
             const auto glyph_width = text.font.glyphWidth();
             const auto glyph_height = text.font.glyphHeight();
             for (std::size_t i = 0; i < text.value.size(); ++i) {
@@ -786,10 +935,31 @@ void Context::render(Surface target) const {
                 }
                 if (x < width_ && x > -static_cast<std::int64_t>(glyph_width) &&
                     y < height_ && y > -static_cast<std::int64_t>(glyph_height)) {
+                    Color foreground = color;
+                    std::optional<Color> background;
+                    bool underline = false;
+                    if (!text.styles.empty()) {
+                        const auto& style = text.styles[i];
+                        foreground = resolve(style.foreground);
+                        if (style.background) background = resolve(*style.background);
+                        if (style.inverse) {
+                            const auto base = background.value_or(
+                                paletteColor(palette_, ColorIndex{0}));
+                            background = foreground;
+                            foreground = base;
+                        }
+                        underline = style.underline;
+                    }
+                    if (background) fillRectangle(target, width_, height_, x, y,
+                                                   glyph_width, glyph_height,
+                                                   *background, text.clip);
                     drawGlyph(target, width_, height_, x, y,
                               text.font.bitmap(codepoint), glyph_width,
-                              glyph_height, text.font.bytesPerRow(), color,
+                              glyph_height, text.font.bytesPerRow(), foreground,
                               text.clip);
+                    if (underline) fillRectangle(target, width_, height_, x,
+                                                  y + glyph_height - 1, glyph_width,
+                                                  1, foreground, text.clip);
                 }
                 advance(x, glyph_width);
                 if (i + 1 < text.value.size() && text.value[i + 1] != U'\n') {
@@ -910,12 +1080,27 @@ bool TextViewport::autoFollow() const noexcept { return auto_follow_; }
 
 void TextReveal::setText(const Context& context, std::string_view value,
                          std::uint32_t max_width) {
-    if (max_width == 0) {
-        throw std::invalid_argument("Reveal width must be positive");
-    }
-    const auto decoded = decodeText(value, context.font_);
+    prepare(context, decodeText(value, context.font_), {}, max_width);
+}
+
+void TextReveal::setStyledText(const Context& context, const StyledText& value,
+                               std::uint32_t max_width) {
+    auto decoded = decodeStyled(value, context.font_);
+    prepare(context, std::move(decoded.text), std::move(decoded.styles), max_width);
+}
+
+void TextReveal::prepare(const Context& context, std::u32string decoded,
+                         std::vector<TextStyle> styles, std::uint32_t max_width) {
+    if (max_width == 0) throw std::invalid_argument("Reveal width must be positive");
     auto layout = layoutText(decoded, context.font_, context.letter_spacing_,
-                             max_width);
+                             max_width, !styles.empty());
+    std::vector<TextStyle> laid_styles;
+    if (!styles.empty()) {
+        laid_styles.reserve(layout.text.size());
+        for (const auto source : layout.source_indices) {
+            laid_styles.push_back(source == styles.size() ? TextStyle{} : styles.at(source));
+        }
+    }
     std::vector<std::pair<std::int64_t, std::int64_t>> positions;
     positions.reserve(layout.text.size() + 1);
     std::int64_t px = 0;
@@ -953,6 +1138,7 @@ void TextReveal::setText(const Context& context, std::string_view value,
 
     // Commit only after complete validation and allocation succeeded.
     laid_out_ = std::move(layout.text);
+    styles_ = std::move(laid_styles);
     lines_ = std::move(lines);
     metrics_ = layout.metrics;
     positions_ = std::move(positions);
@@ -1090,7 +1276,11 @@ void TextReveal::queueViewport(Context& context, const TextViewport& viewport,
                                          static_cast<std::int64_t>(offset) * gh);
         context.commands_.push_back(Context::TextCommand{
             viewport.area_.x, y, laid_out_.substr(line.begin, visible_count),
-            color, font_, spacing_, indexed, index, viewport.area_});
+            color, font_, spacing_, indexed, index, viewport.area_,
+            styles_.empty() ? std::vector<TextStyle>{}
+                            : std::vector<TextStyle>(
+                                styles_.begin() + static_cast<std::ptrdiff_t>(line.begin),
+                                styles_.begin() + static_cast<std::ptrdiff_t>(line.begin + visible_count))});
     }
     const auto offset_y = -static_cast<std::int64_t>(top) * gh;
     queueCursor(context, viewport.area_.x, viewport.area_.y,
@@ -1131,12 +1321,19 @@ void TextReveal::queue(Context& context, int x, int y, Color color,
     if (positions_.empty()) return;
     std::u32string text;
     text.reserve(laid_out_.size());
+    std::vector<TextStyle> visible_styles;
+    if (!styles_.empty()) visible_styles.reserve(visible_ + metrics_.lines);
     std::size_t copied = 0;
-    for (char32_t cp : laid_out_) {
+    for (std::size_t i = 0; i < laid_out_.size(); ++i) {
+        const auto cp = laid_out_[i];
         if (cp == U'\n') {
-            if (copied < visible_) text.push_back(cp);
+            if (copied < visible_) {
+                text.push_back(cp);
+                if (!styles_.empty()) visible_styles.push_back(styles_[i]);
+            }
         } else if (copied < visible_) {
             text.push_back(cp);
+            if (!styles_.empty()) visible_styles.push_back(styles_[i]);
             ++copied;
         } else {
             break;
@@ -1144,7 +1341,8 @@ void TextReveal::queue(Context& context, int x, int y, Color color,
     }
     if (!text.empty()) {
         context.commands_.push_back(Context::TextCommand{
-            x, y, std::move(text), color, font_, spacing_, indexed, index, clip});
+            x, y, std::move(text), color, font_, spacing_, indexed, index, clip,
+            std::move(visible_styles)});
     }
     queueCursor(context, x, y, clip, 0);
 }

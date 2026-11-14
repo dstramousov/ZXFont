@@ -1,6 +1,7 @@
 #include "../common/demo_support.hpp"
 #include "../common/demo_fonts.hpp"
 #include "../common/reveal_demo.hpp"
+#include "../common/styled_demo.hpp"
 #include "../common/sdl_display.hpp"
 
 #include <SDL3/SDL.h>
@@ -152,7 +153,8 @@ int main() {
             const auto content = ui.panel(8, 128, 240, 56,
                 scenario == 1 ? "ДИМАС:" : "КАЯ:");
             ui.clear();
-            reveal.setText(ui, dialogueText(scenario), content.width);
+            reveal.setStyledText(ui, demo::styledReply(dialogueText(scenario)),
+                                 content.width);
             viewport.configure(reveal, content);
             viewport.reset();
         };

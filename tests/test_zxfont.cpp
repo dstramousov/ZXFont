@@ -1214,6 +1214,165 @@ void testTextViewport() {
     require(renderPanelTest(ui) == renderPanelTest(expected));
 }
 
+
+void testStyledText() {
+    constexpr std::size_t stride = 64 * 4;
+    auto render = [](zx::Context& context) {
+        std::vector<std::uint8_t> pixels(64 * 32 * 4, 0);
+        context.render({pixels, 64, 32, stride});
+        return pixels;
+    };
+    const auto green = zx::paletteColor(zx::Palette::MonoGreen, {10});
+    const auto red = zx::paletteColor(zx::Palette::Spectrum, {10});
+    zx::Context ui(64, 32);
+    zx::StyledText colored;
+    colored.add("АБ", zx::ColorIndex{10});
+    colored.add("ВГ", zx::Color{200, 100, 50, 255});
+    colored.add("!", zx::ColorIndex{12});
+    require(!colored.empty());
+    ui.styledText(0, 0, colored);
+    auto pixels = render(ui);
+    // First glyph uses indexed green, third retains its explicit RGBA color.
+    require(pixels[offset(2, 1, stride)] == green.r);
+    require(pixels[offset(2, 1, stride) + 1] == green.g);
+    require(pixels[offset(18, 1, stride)] == 200);
+    require(pixels[offset(18, 1, stride) + 1] == 100);
+    require(pixels[offset(18, 1, stride) + 2] == 50);
+    ui.setPalette(zx::Palette::Spectrum);
+    pixels = render(ui);
+    require(pixels[offset(2, 1, stride)] == red.r);
+    require(pixels[offset(2, 1, stride) + 1] == red.g);
+    require(pixels[offset(18, 1, stride)] == 200);
+
+    // A background paints the whole glyph cell, including empty bits.
+    zx::TextStyle decorated;
+    decorated.foreground = zx::Color{15, 230, 20, 255};
+    decorated.background = zx::Color{50, 60, 70, 255};
+    decorated.underline = true;
+    zx::StyledText decoration;
+    decoration.add("A", decorated);
+    ui.clear();
+    ui.styledText(0, 0, decoration);
+    pixels = render(ui);
+    require(pixels[offset(0, 0, stride)] == 50);
+    require(pixels[offset(2, 1, stride)] == 15);
+    require(pixels[offset(0, 7, stride)] == 15);
+    // Inverse swaps the two colors and also works on spaces.
+    decorated.inverse = true;
+    decorated.underline = false;
+    zx::StyledText inversed;
+    inversed.add(" A", decorated);
+    ui.clear();
+    ui.styledText(0, 0, inversed);
+    pixels = render(ui);
+    require(pixels[offset(0, 0, stride)] == 15);
+    require(pixels[offset(10, 1, stride)] == 50);
+    decorated.background.reset();
+    inversed.clear();
+    require(inversed.empty());
+    inversed.add("A", decorated);
+    ui.clear();
+    ui.styledText(0, 0, inversed);
+    pixels = render(ui);
+    require(pixels[offset(0, 0, stride)] == 15);
+    require(pixels[offset(2, 1, stride)] ==
+            zx::paletteColor(zx::Palette::Spectrum, {0}).r);
+
+    // A single word split between styles must not gain a space at the boundary.
+    zx::StyledText wrapped;
+    wrapped.add("АБ", zx::ColorIndex{10});
+    wrapped.add("ВГ", zx::ColorIndex{12});
+    ui.clear();
+    ui.styledTextBox(0, 0, 16, wrapped);
+    auto actual = render(ui);
+    zx::Context reference(64, 32);
+    reference.setPalette(zx::Palette::Spectrum);
+    reference.text(0, 0, "АБ", zx::ColorIndex{10});
+    reference.text(0, 8, "ВГ", zx::ColorIndex{12});
+    require(actual == render(reference));
+
+    // Spaces stripped at word wraps must not move styles to other glyphs.
+    wrapped.clear();
+    wrapped.add("АБ  ", zx::ColorIndex{10});
+    wrapped.add("ВГ", zx::ColorIndex{12});
+    ui.clear();
+    ui.styledTextBox(0, 0, 16, wrapped);
+    require(render(ui) == render(reference));
+
+    // Panel clipping is exact even with backgrounds/underline and partial rows.
+    zx::PanelArea clip{0, 0, 14, 5};
+    zx::StyledText block;
+    zx::TextStyle block_style;
+    block_style.foreground = zx::Color{200, 100, 50, 255};
+    block_style.background = zx::Color{77, 44, 22, 255};
+    block_style.underline = true;
+    block.add("ABCD", block_style);
+    ui.clear();
+    ui.panelStyledText(clip, block);
+    pixels = render(ui);
+    require(pixels[offset(0, 0, stride)] == 77);
+    require(pixels[offset(15, 0, stride)] == 0);
+    require(pixels[offset(0, 5, stride)] == 0);
+    require(throws<std::invalid_argument>([&] {
+        ui.panelStyledText(zx::PanelArea{0, 0, 7, 8}, block);
+    }));
+
+    // A reveal and a viewport preserve both styles and the wrapped layout.
+    zx::RevealOptions opts;
+    opts.charsPerSecond = 2;
+    opts.cursorEnabled = false;
+    zx::TextReveal reveal(opts);
+    wrapped.clear();
+    wrapped.add("АБ", zx::ColorIndex{10});
+    wrapped.add("ВГ", zx::ColorIndex{12});
+    reveal.setStyledText(ui, wrapped, 16);
+    require(reveal.metrics().lines == 2);
+    reveal.update(1.05); // Two Cyrillic glyphs, not four UTF-8 bytes.
+    require(reveal.visibleCharacters() == 2);
+    ui.clear();
+    reveal.draw(ui, 0, 0);
+    reference.clear();
+    reference.text(0, 0, "АБ", zx::ColorIndex{10});
+    require(render(ui) == render(reference));
+    reveal.finish();
+    ui.clear();
+    reveal.draw(ui, 0, 0);
+    reference.text(0, 8, "ВГ", zx::ColorIndex{12});
+    require(render(ui) == render(reference));
+
+    zx::TextViewport view;
+    view.configure(reveal, zx::PanelArea{0, 0, 16, 8});
+    view.end(reveal);
+    view.scrollLines(-1); // Terminal caret occupies an extra line after a full row.
+    ui.clear();
+    reveal.draw(ui, view);
+    reference.clear();
+    reference.text(0, 0, "ВГ", zx::ColorIndex{12});
+    require(render(ui) == render(reference));
+    view.home();
+    ui.clear();
+    reveal.draw(ui, view);
+    reference.clear();
+    reference.text(0, 0, "АБ", zx::ColorIndex{10});
+    require(render(ui) == render(reference));
+    require(!view.autoFollow());
+
+    // Validation rejects bad fragments and must not replace an existing reveal.
+    zx::StyledText invalid;
+    require(throws<std::out_of_range>([&] {
+        invalid.add("A", zx::ColorIndex{16});
+    }));
+    require(throws<std::invalid_argument>([&] {
+        invalid.add("\xC0\x80", zx::ColorIndex{10});
+        reveal.setStyledText(ui, invalid, 16);
+    }));
+    require(reveal.visibleCharacters() == 4);
+    require(throws<std::invalid_argument>([&] {
+        reveal.setStyledText(ui, wrapped, 7);
+    }));
+    require(reveal.visibleCharacters() == 4);
+}
+
 }  // namespace
 
 int main() {
@@ -1231,4 +1390,5 @@ int main() {
     testPseudographics();
     testPanels();
     testTextViewport();
+    testStyledText();
 }
