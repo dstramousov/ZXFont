@@ -137,7 +137,8 @@ struct TextStyle {
     TextColor foreground = ColorIndex{15};
     std::optional<TextColor> background;
     bool underline = false;
-    bool inverse = false; // Swap foreground and background; missing background is palette index 0.
+    bool inverse = false; // Spectrum INVERSE: swap INK/PAPER over each entire glyph cell,
+                          // including spaces; missing PAPER uses palette index 0.
 };
 
 /** @brief Text fragments with independent colors and decoration. */
@@ -269,6 +270,16 @@ public:
      * The default is zero (the historical monospace advance).
      */
     void setLetterSpacing(std::uint32_t pixels) noexcept;
+
+    /**
+     * @brief Set extra vertical pixels between neighboring text lines.
+     *
+     * Zero preserves the historical glyph-height line advance. Multiline
+     * commands capture the current spacing; TextReveal captures it at
+     * setText()/setStyledText(). Call those again after changing spacing to
+     * reflow an existing reveal and reconfigure its TextViewport.
+     */
+    void setLineSpacing(std::uint32_t pixels) noexcept;
 
     /**
      * @brief Select an external PSF2 font with built-in fallback.
@@ -448,6 +459,7 @@ private:
         ColorIndex index{0};
         std::optional<PanelArea> clip;
         std::vector<TextStyle> styles{}; // Empty means legacy uniform-color rendering.
+        std::uint32_t line_spacing = 0; // Captured at command creation.
     };
 
     struct BoxCommand {
@@ -507,6 +519,7 @@ private:
     std::uint32_t height_;
     Font font_;
     std::uint32_t letter_spacing_ = 0;
+    std::uint32_t line_spacing_ = 0;
     Palette palette_ = Palette::MonoGreen;
     std::vector<std::variant<TextCommand, BoxCommand, LineCommand, CursorCommand>> commands_;
 
@@ -592,7 +605,7 @@ public:
     /** @brief Current text caret line (zero-based, including explicit LF). */
     [[nodiscard]] std::size_t caretLine() const noexcept;
 
-    /** @brief Height of a line in the captured bitmap font. */
+    /** @brief Glyph height plus captured line spacing (vertical advance). */
     [[nodiscard]] std::uint32_t lineHeight() const noexcept;
 
 private:
@@ -616,6 +629,7 @@ private:
     RevealOptions options_;
     Font font_;
     std::uint32_t spacing_ = 0;
+    std::uint32_t line_spacing_ = 0;
     std::uint32_t max_width_ = 0;
     std::u32string laid_out_;
     std::vector<TextStyle> styles_; // Aligned with laid_out_, including synthetic LF.

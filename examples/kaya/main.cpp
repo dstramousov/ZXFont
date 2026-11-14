@@ -79,7 +79,8 @@ void drawTerminal(zx::Context& ui, const zx::TextReveal& historyText,
                   const zx::TextReveal& reveal, const zx::TextViewport& replyView,
                   bool historyFocused, bool help, int scenario,
                   bool cursor_visible, zx::Palette palette,
-                  bool compact, std::uint32_t compact_spacing) {
+                  bool compact, std::uint32_t compact_spacing,
+                  std::uint32_t line_spacing) {
     ui.box(16, 16, 608, 368, zx::Border::Single, kDim);
     ui.line(16, 64, 608, zx::Axis::Horizontal, zx::Border::Single, kDim);
     ui.line(16, 336, 608, zx::Axis::Horizontal, zx::Border::Single, kDim);
@@ -97,7 +98,8 @@ void drawTerminal(zx::Context& ui, const zx::TextReveal& historyText,
         ui.text(48, 172, "F3   - SWITCH 8X8 / 6X8", kText);
         ui.text(48, 184, "F4   - COMPACT SPACING 0/1/2", kText);
         ui.text(48, 196, "F5   - CHANGE DIALOGUE", kText);
-        ui.text(48, 208, "F11  - TOGGLE FULLSCREEN", kText);
+        ui.text(48, 208, "F10  - LINE SPACING 0/1/2/3", kText);
+        ui.text(48, 220, "F11  - TOGGLE FULLSCREEN", kText);
         ui.text(48, 240, "F6 SPEED  F7 CURSOR GAP  F8 LEAD", kText);
         ui.text(48, 252, "F9 BLINK  ENTER FINISH / RESTART", kText);
         ui.text(48, 276, "TAB SWITCH HISTORY / REPLY", kText);
@@ -156,14 +158,13 @@ void drawTerminal(zx::Context& ui, const zx::TextReveal& historyText,
                 std::to_string(active.firstLine() + 1) +
                 (active.autoFollow() ? " AUTO" : " MANUAL"), kDim);
     }
-    if (compact) {
-        ui.text(480, 324, "SPACING: " + std::to_string(compact_spacing), kDim);
-    }
+    ui.text(400, 324, "LSP:" + std::to_string(line_spacing) +
+            (compact ? " CSP:" + std::to_string(compact_spacing) : ""), kDim);
     ui.text(40, 352, ">", kBright);
     if (cursor_visible) {
         ui.text(56, 352, "_", kText);
     }
-    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 FONT | F5 SCENE | TAB PANE | F11 FULL", kDim);
+    ui.text(16, 384, "ESC EXIT | F1 HELP | F2 COLOR | F3 FONT | F5 SCENE | F10 LINE | F11 FULL", kDim);
 }
 
 }  // namespace
@@ -176,6 +177,8 @@ int main() {
         zx::Context ui(kWidth, kHeight);
         bool use_compact = false;
         std::uint32_t compact_spacing = 1;
+        std::uint32_t line_spacing = 1;
+        ui.setLineSpacing(line_spacing);
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
         bool running = true;
@@ -272,6 +275,11 @@ int main() {
                             reveal.setOptions(opts);
                             break;
                         }
+                        case SDLK_F10:
+                            line_spacing = (line_spacing + 1) % 4;
+                            ui.setLineSpacing(line_spacing);
+                            refreshDialogue();
+                            break;
                         case SDLK_TAB:
                             if (!help && (scenario <= 1 || scenario == 4))
                                 historyFocused = !historyFocused;
@@ -330,7 +338,7 @@ int main() {
             drawTerminal(ui, historyText, historyView, reveal, replyView,
                          historyFocused, help, scenario,
                          (SDL_GetTicks() / 500) % 2 == 0,
-                         palette, use_compact, compact_spacing);
+                         palette, use_compact, compact_spacing, line_spacing);
             ui.render(frame.surface());
             display.present(frame.pixels());
             SDL_Delay(16);

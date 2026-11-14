@@ -143,7 +143,8 @@ struct LayoutResult {
 };
 
 LayoutResult layoutText(const std::u32string& input, const Font& font,
-                        std::uint32_t spacing, std::uint32_t max_width,
+                        std::uint32_t spacing, std::uint32_t line_spacing,
+                        std::uint32_t max_width,
                         bool capture_sources = false) {
     const auto gw = font.glyphWidth();
     const auto gh = font.glyphHeight();
@@ -231,11 +232,14 @@ LayoutResult layoutText(const std::u32string& input, const Font& font,
         if (capture_sources) result.source_indices.insert(
             result.source_indices.end(), line_sources[n].begin(), line_sources[n].end());
     }
-    const std::uint64_t height = static_cast<std::uint64_t>(lines.size()) * gh;
-    if (widest > std::numeric_limits<std::uint32_t>::max() ||
-        height > std::numeric_limits<std::uint32_t>::max()) {
+    const std::uint64_t step = static_cast<std::uint64_t>(gh) + line_spacing;
+    const auto gaps = static_cast<std::uint64_t>(lines.size() - 1);
+    const auto max_height = std::numeric_limits<std::uint32_t>::max();
+    if (widest > max_height ||
+        (gaps != 0 && step > (max_height - gh) / gaps)) {
         throw std::overflow_error("Text metrics exceed uint32_t");
     }
+    const std::uint64_t height = gh + gaps * step;
     result.metrics.width = static_cast<std::uint32_t>(widest);
     result.metrics.height = static_cast<std::uint32_t>(height);
     return result;
@@ -521,6 +525,10 @@ void Context::setLetterSpacing(std::uint32_t pixels) noexcept {
     letter_spacing_ = pixels;
 }
 
+void Context::setLineSpacing(std::uint32_t pixels) noexcept {
+    line_spacing_ = pixels;
+}
+
 bool Context::setFont(const std::filesystem::path& path, std::string* error) {
     try {
         Font loaded = Font::loadPsf2(path);
@@ -562,13 +570,14 @@ void Context::appendText(int x, int y, std::string_view value, Color color,
                          bool indexed, ColorIndex index) {
     auto decoded = decodeText(value, font_);
     commands_.push_back(TextCommand{x, y, std::move(decoded), color, font_,
-                                    letter_spacing_, indexed, index, std::nullopt});
+                                    letter_spacing_, indexed, index, std::nullopt,
+                                    {}, line_spacing_});
 }
 
 TextMetrics Context::measureText(std::string_view value,
                                  std::uint32_t max_width) const {
     return layoutText(decodeText(value, font_), font_, letter_spacing_,
-                      max_width).metrics;
+                      line_spacing_, max_width).metrics;
 }
 
 void Context::textBox(int x, int y, std::uint32_t max_width,
@@ -589,9 +598,10 @@ void Context::appendBox(int x, int y, std::uint32_t max_width,
         throw std::invalid_argument("Text box width must be positive");
     }
     auto laid_out = layoutText(decodeText(value, font_), font_,
-                               letter_spacing_, max_width);
+                               letter_spacing_, line_spacing_, max_width);
     commands_.push_back(TextCommand{x, y, std::move(laid_out.text), color,
-                                    font_, letter_spacing_, indexed, index, std::nullopt});
+                                    font_, letter_spacing_, indexed, index, std::nullopt,
+                                    {}, line_spacing_});
 }
 
 void Context::box(int x, int y, std::uint32_t width, std::uint32_t height,
@@ -707,7 +717,8 @@ PanelArea Context::appendPanel(int x, int y, std::uint32_t width,
     else box(x, y, width, height, options.border, border_color, fill);
     if (!title_text.empty()) {
         commands_.push_back(TextCommand{tx, ay, title_text, title_color,
-            font_, letter_spacing_, indexed, title_index, title_area});
+            font_, letter_spacing_, indexed, title_index, title_area,
+            {}, line_spacing_});
     }
     return body_area;
 }
@@ -731,23 +742,26 @@ void Context::appendPanelText(PanelArea area, std::string_view value,
         throw std::invalid_argument("Panel interior is too small for text");
     }
     const auto layout = layoutText(decodeText(value, font_), font_,
-                                   letter_spacing_, area.width);
+                                   letter_spacing_, line_spacing_, area.width);
     // Prepare all commands before appending for strong exception safety.
     std::vector<TextCommand> prepared;
     std::size_t start = 0;
     std::uint64_t row = 0;
+    const auto step = static_cast<std::uint64_t>(font_.glyphHeight()) + line_spacing_;
     while (start < layout.text.size()) {
         const auto end = layout.text.find(U'\n', start);
         const auto stop = end == std::u32string::npos ? layout.text.size() : end;
+        if (row > area.height / step) break;
         const auto pos_y = static_cast<std::int64_t>(area.y) +
-                           static_cast<std::int64_t>(row) * font_.glyphHeight();
+                           static_cast<std::int64_t>(row * step);
         if (pos_y >= static_cast<std::int64_t>(area.y) + area.height) break;
         const auto count = stop - start;
         const auto pos_x = alignedX(area, linePixels(count, font_.glyphWidth(),
                                                     letter_spacing_), align);
         prepared.push_back(TextCommand{checkedCoordinate(pos_x),
             checkedCoordinate(pos_y), layout.text.substr(start, count), color,
-            font_, letter_spacing_, indexed, index, area});
+            font_, letter_spacing_, indexed, index, area,
+            {}, line_spacing_});
         if (end == std::u32string::npos) break;
         start = end + 1;
         ++row;
@@ -785,7 +799,8 @@ void Context::appendStyled(int x, int y, std::uint32_t max_width,
             layout.source_indices.push_back(i);
         }
     } else {
-        layout = layoutText(decoded.text, font_, letter_spacing_, max_width, true);
+        layout = layoutText(decoded.text, font_, letter_spacing_, line_spacing_,
+                            max_width, true);
     }
     std::vector<TextStyle> laid_styles;
     laid_styles.reserve(layout.text.size());
@@ -796,7 +811,7 @@ void Context::appendStyled(int x, int y, std::uint32_t max_width,
     if (!clip) {
         commands_.push_back(TextCommand{x, y, layout.text, Color{}, font_,
             letter_spacing_, false, ColorIndex{0}, std::nullopt,
-            std::move(laid_styles)});
+            std::move(laid_styles), line_spacing_});
         return;
     }
     const auto gh = font_.glyphHeight();
@@ -806,8 +821,10 @@ void Context::appendStyled(int x, int y, std::uint32_t max_width,
     while (begin < layout.text.size()) {
         const auto end = layout.text.find(U'\n', begin);
         const auto stop = end == std::u32string::npos ? layout.text.size() : end;
+        const auto step = static_cast<std::uint64_t>(gh) + line_spacing_;
+        if (line_num > clip->height / step) break;
         const auto py = static_cast<std::int64_t>(y) +
-                        static_cast<std::int64_t>(line_num) * gh;
+                        static_cast<std::int64_t>(line_num * step);
         if (py >= static_cast<std::int64_t>(clip->y) + clip->height) break;
         const auto count = stop - begin;
         if (count != 0 && py + gh > clip->y) {
@@ -817,7 +834,8 @@ void Context::appendStyled(int x, int y, std::uint32_t max_width,
                 layout.text.substr(begin, count), Color{}, font_, letter_spacing_,
                 false, ColorIndex{0}, clip,
                 {laid_styles.begin() + static_cast<std::ptrdiff_t>(begin),
-                 laid_styles.begin() + static_cast<std::ptrdiff_t>(stop)}});
+                 laid_styles.begin() + static_cast<std::ptrdiff_t>(stop)},
+                line_spacing_});
         }
         if (end == std::u32string::npos) break;
         begin = end + 1;
@@ -931,6 +949,7 @@ void Context::render(Surface target) const {
                 if (codepoint == U'\n') {
                     x = text.x;
                     advance(y, glyph_height);
+                    advance(y, text.line_spacing);
                     continue;
                 }
                 if (x < width_ && x > -static_cast<std::int64_t>(glyph_width) &&
@@ -943,10 +962,12 @@ void Context::render(Surface target) const {
                         foreground = resolve(style.foreground);
                         if (style.background) background = resolve(*style.background);
                         if (style.inverse) {
-                            const auto base = background.value_or(
+                            // Spectrum INVERSE swaps INK and PAPER across the
+                            // entire character cell, including blank space glyphs.
+                            const auto paper = background.value_or(
                                 paletteColor(palette_, ColorIndex{0}));
-                            background = foreground;
-                            foreground = base;
+                            background = foreground; // New PAPER fills the cell.
+                            foreground = paper;      // New INK draws the bitmap.
                         }
                         underline = style.underline;
                     }
@@ -1000,7 +1021,9 @@ void TextViewport::configure(const TextReveal& text, PanelArea area) {
     total_lines_ = text.metrics_.lines + (text.terminalCaretWraps() ? 1u : 0u);
     revealed_lines_ = total_lines_ == 0 ? 0 :
         std::min(total_lines_, text.caretLine() + 1);
-    page_lines_ = std::max<std::size_t>(1, area.height / line_height);
+    const auto glyph_height = text.font_.glyphHeight();
+    page_lines_ = area.height < glyph_height ? 1 :
+        1 + static_cast<std::size_t>((area.height - glyph_height) / line_height);
     first_line_ = std::min(first_line_, maxFirstLine());
 }
 
@@ -1092,8 +1115,12 @@ void TextReveal::setStyledText(const Context& context, const StyledText& value,
 void TextReveal::prepare(const Context& context, std::u32string decoded,
                          std::vector<TextStyle> styles, std::uint32_t max_width) {
     if (max_width == 0) throw std::invalid_argument("Reveal width must be positive");
+    if (context.line_spacing_ > std::numeric_limits<std::uint32_t>::max() -
+                                context.font_.glyphHeight()) {
+        throw std::overflow_error("Reveal line height exceeds uint32_t");
+    }
     auto layout = layoutText(decoded, context.font_, context.letter_spacing_,
-                             max_width, !styles.empty());
+                             context.line_spacing_, max_width, !styles.empty());
     std::vector<TextStyle> laid_styles;
     if (!styles.empty()) {
         laid_styles.reserve(layout.text.size());
@@ -1111,6 +1138,7 @@ void TextReveal::prepare(const Context& context, std::u32string decoded,
         if (layout.text[i] == U'\n') {
             px = 0;
             advance(py, gh);
+            advance(py, context.line_spacing_);
             continue;
         }
         positions.emplace_back(px, py);
@@ -1144,6 +1172,7 @@ void TextReveal::prepare(const Context& context, std::u32string decoded,
     positions_ = std::move(positions);
     font_ = context.font_;
     spacing_ = context.letter_spacing_;
+    line_spacing_ = context.line_spacing_;
     max_width_ = max_width;
     reset();
     if (options_.charsPerSecond == 0) finish();
@@ -1203,7 +1232,7 @@ std::size_t TextReveal::visibleCharacters() const noexcept { return visible_; }
 TextMetrics TextReveal::metrics() const noexcept { return metrics_; }
 
 std::uint32_t TextReveal::lineHeight() const noexcept {
-    return font_.glyphHeight();
+    return font_.glyphHeight() + line_spacing_;
 }
 
 bool TextReveal::terminalCaretWraps() const noexcept {
@@ -1215,7 +1244,7 @@ bool TextReveal::terminalCaretWraps() const noexcept {
 std::size_t TextReveal::caretLine() const noexcept {
     if (positions_.empty() || metrics_.lines == 0) return 0;
     const auto y = positions_[visible_].second;
-    const auto row = static_cast<std::size_t>(y / font_.glyphHeight());
+    const auto row = static_cast<std::size_t>(y / lineHeight());
     if (finished() && terminalCaretWraps()) return metrics_.lines;
     return std::min(row, metrics_.lines - 1);
 }
@@ -1251,7 +1280,7 @@ void TextReveal::draw(Context& context, const TextViewport& viewport,
 
 void TextReveal::queueViewport(Context& context, const TextViewport& viewport,
                                Color color, bool indexed, ColorIndex index) const {
-    if (viewport.line_height_ != font_.glyphHeight() ||
+    if (viewport.line_height_ != lineHeight() ||
         viewport.area_.width != max_width_ ||
         viewport.total_lines_ != metrics_.lines + (terminalCaretWraps() ? 1u : 0u) ||
         viewport.area_.height == 0) {
@@ -1262,10 +1291,10 @@ void TextReveal::queueViewport(Context& context, const TextViewport& viewport,
         return;
     }
     const auto top = viewport.first_line_;
-    const auto gh = font_.glyphHeight();
+    const auto step = lineHeight();
     // Include a partially visible final row, without walking hidden lines.
-    const auto visible_rows = static_cast<std::size_t>(viewport.area_.height / gh) +
-                              (viewport.area_.height % gh != 0 ? 1u : 0u);
+    const auto visible_rows = static_cast<std::size_t>(viewport.area_.height / step) +
+                              (viewport.area_.height % step != 0 ? 1u : 0u);
     const auto count = std::min(visible_rows, lines_.size() - top);
     for (std::size_t offset = 0; offset < count; ++offset) {
         const auto& line = lines_[top + offset];
@@ -1273,16 +1302,17 @@ void TextReveal::queueViewport(Context& context, const TextViewport& viewport,
         const auto visible_count = std::min(line.length, visible_ - line.first_character);
         if (visible_count == 0) continue;
         const auto y = checkedCoordinate(static_cast<std::int64_t>(viewport.area_.y) +
-                                         static_cast<std::int64_t>(offset) * gh);
+                                         static_cast<std::int64_t>(offset) * step);
         context.commands_.push_back(Context::TextCommand{
             viewport.area_.x, y, laid_out_.substr(line.begin, visible_count),
             color, font_, spacing_, indexed, index, viewport.area_,
             styles_.empty() ? std::vector<TextStyle>{}
                             : std::vector<TextStyle>(
                                 styles_.begin() + static_cast<std::ptrdiff_t>(line.begin),
-                                styles_.begin() + static_cast<std::ptrdiff_t>(line.begin + visible_count))});
+                                styles_.begin() + static_cast<std::ptrdiff_t>(line.begin + visible_count)),
+            line_spacing_});
     }
-    const auto offset_y = -static_cast<std::int64_t>(top) * gh;
+    const auto offset_y = -static_cast<std::int64_t>(top) * step;
     queueCursor(context, viewport.area_.x, viewport.area_.y,
                 viewport.area_, offset_y);
 }
@@ -1302,7 +1332,7 @@ void TextReveal::queueCursor(Context& context, std::int64_t x, std::int64_t y,
         (visible_ > 0 && at_y != positions_[visible_ - 1].second);
     if (finished() && cursor_x + gw > max_width_ && cursor_x != 0) {
         cursor_x = 0;
-        advance(cursor_y, font_.glyphHeight());
+        advance(cursor_y, lineHeight());
     } else if (!start_of_line &&
                cursor_x + gw + options_.cursorGapPx <= max_width_) {
         advance(cursor_x, options_.cursorGapPx);
@@ -1342,7 +1372,7 @@ void TextReveal::queue(Context& context, int x, int y, Color color,
     if (!text.empty()) {
         context.commands_.push_back(Context::TextCommand{
             x, y, std::move(text), color, font_, spacing_, indexed, index, clip,
-            std::move(visible_styles)});
+            std::move(visible_styles), line_spacing_});
     }
     queueCursor(context, x, y, clip, 0);
 }

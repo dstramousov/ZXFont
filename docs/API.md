@@ -33,6 +33,14 @@ ui.text(8, 40, "Кая", {255, 200, 100, 255});
 - `Font::glyphWidth()`, `glyphHeight()`, `hasGlyph(codepoint)` query coverage.
 - Glyph dimensions are 1..256 pixels per axis; font files are limited to 16 MiB.
 - Fonts are immutable, and copies share ownership of the underlying bitmaps.
+- `Context::setLineSpacing(pixels)` adds vertical pixels *between* glyph rows
+  of consecutive lines, leaving the last row without trailing padding.
+  Default: 0. `measureText()` reports `glyphHeight * lines +
+  lineSpacing * (lines - 1)`. All subsequent text commands snapshot this
+  setting. `TextReveal::setText()` / `setStyledText()` snapshot it too;
+  reconfigure `TextViewport` after changing the text layout. The viewport,
+  cursor, wrapping and clipping use the same vertical advance. In both demos,
+  F10 cycles 0/1/2/3 px (Kaya starts at 1 px, Mode256 at 0 px).
 - `Context::setLetterSpacing(pixels)` selects extra horizontal pixels between
   neighboring glyphs for subsequently queued commands. Default: 0. Spacing
   includes ordinary space glyphs, excludes the end of each line, and does not
@@ -42,7 +50,7 @@ ui.text(8, 40, "Кая", {255, 200, 100, 255});
 - `Context::setFont(font)` affects subsequent text commands only. Previously
   queued text keeps the font it was originally submitted with. This already
   permits **different glyph dimensions within one frame** with no new API.
-  Newline advances by the height of the font captured for each command.
+  Newline advances by the captured glyph height plus line spacing.
 - `Context::setFont(path, &error)` attempts to select an external PSF2 file.
   On a missing, unreadable, or malformed file it selects the built-in Spectrum
   Unicode 8x8, returns `false`, and optionally describes the failure in `error`.
@@ -132,7 +140,7 @@ and spacing are snapshotted like regular `text()` commands.
 ui.setLetterSpacing(1);
 const auto metrics = ui.measureText("Привет, Кая! Как дела?", 120);
 ui.textBox(8, 120, 120, "Привет, Кая! Как дела?", zx::ColorIndex{12});
-// metrics.width <= 120, metrics.height is a multiple of glyphHeight().
+// metrics.width <= 120; height includes any configured line gaps.
 ```
 
 The word separator is U+0020 SPACE. No hyphenation, tab expansion, Unicode
@@ -145,7 +153,7 @@ line-break algorithm or shaping is provided in this version.
   checked strictly: malformed, overlong, surrogate, and out-of-range encodings
   are rejected with `std::invalid_argument`.
 - `\n` is the only supported control character: it resets x and advances y by
-  the active font's height. `\r` and `\t` are rejected.
+  the captured font height plus `setLineSpacing()` pixels. `\r` and `\t` are rejected.
 - No automatic wrapping, bidirectional shaping, normalization or font fallback.
 - `clear()` drops commands without touching any framebuffer pixels.
 - `render(surface)` replays commands onto the caller-owned RGBA8 byte buffer.
@@ -369,7 +377,8 @@ viewport.end(reply);       // Latest revealed row, resume auto-follow.
   (at least one). `autoFollow()` reports whether new characters can move the
   viewport. Partial bottom rows are pixel-clipped by the RGBA renderer.
 - `TextReveal::caretLine()` returns the zero-based logical line where the next
-  glyph would be printed; `lineHeight()` reports its captured font height.
+  glyph would be printed; `lineHeight()` reports its captured glyph height
+  plus configured line spacing.
 - `end(reveal)` follows the **revealed** end, not the blank bottom of the full
   unrevealed message. While manually scrolled up, `follow(reveal)` has no
   effect. Moving with End explicitly resumes auto-follow.
@@ -403,7 +412,7 @@ reply.draw(ui, viewport);                    // Scrolled rendering preserves sty
 ```
 
 - `StyledText::add(text, style/index/RGBA)` appends a fragment; `clear()`, `empty()` and `fragments()` manage/query it. `TextStyle::foreground` is a `TextColor` (`std::variant<Color, ColorIndex>`). `background` is an optional `TextColor`.
-- `underline` draws a one-pixel line along the last glyph row; `inverse` swaps foreground/background. Missing background in inverse mode uses palette index 0.
+- `underline` draws a one-pixel line along the last glyph row; `inverse` reproduces Spectrum INVERSE video: INK and PAPER are swapped across the **whole glyph cell** (including spaces and empty bitmap pixels). Without an explicit PAPER, palette index 0 is used. The two colors are resolved at render time, so palette changes still affect queued text. A separate `letterSpacing` gap is not part of the 8x8 or 6x8 cell.
 - Backgrounds cover glyph cells, including spaces, and follow alpha blending. Indexed colors are resolved at `render()` time; explicit RGBA colors stay fixed.
 - Unsupported glyphs, malformed UTF-8, and out-of-range indexed colors are rejected. Changing font requires new `setStyledText()`/`configure()` calls, just like plain text.
 - Styles survive word wrapping and dropped separator spaces. `TextReveal::visibleCharacters()` still counts Unicode codepoints rather than UTF-8 bytes; viewport paints only visible rows. The `color` argument of `TextReveal::draw()` is ignored for a styled message (colors come from the fragments); its cursor still uses `RevealOptions::cursorColor`.

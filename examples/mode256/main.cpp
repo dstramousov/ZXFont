@@ -139,6 +139,7 @@ int main() {
         zx::Context ui(kWidth, kHeight);
         bool use_compact = false;
         std::uint32_t compact_spacing = 1;
+        std::uint32_t line_spacing = 0;
         zx::Palette palette = zx::Palette::MonoGreen;
         ui.setPalette(palette);
         bool running = true;
@@ -224,6 +225,11 @@ int main() {
                             reveal.setOptions(opts);
                             break;
                         }
+                        case SDLK_F10:
+                            line_spacing = (line_spacing + 1) % 4;
+                            ui.setLineSpacing(line_spacing);
+                            refreshDialogue();
+                            break;
                         case SDLK_PAGEUP: viewport.pageUp(); break;
                         case SDLK_PAGEDOWN: viewport.pageDown(); break;
                         case SDLK_HOME: viewport.home(); break;

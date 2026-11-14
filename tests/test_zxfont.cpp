@@ -1373,6 +1373,157 @@ void testStyledText() {
     require(reveal.visibleCharacters() == 4);
 }
 
+void testLineSpacingAndInverseVideo() {
+    constexpr std::size_t stride = 96 * 4;
+    auto render = [](zx::Context& ctx) {
+        std::vector<std::uint8_t> pixels(96 * 64 * 4, 0);
+        ctx.render({pixels, 96, 64, stride});
+        return pixels;
+    };
+    zx::Context ui(96, 64);
+    require(ui.measureText("A\nB").height == 16);
+    ui.setLineSpacing(3);
+    const auto measured = ui.measureText("A\nB\nC");
+    require(measured.lines == 3 && measured.width == 8 && measured.height == 30);
+    require(ui.measureText("A").height == 8);
+    require(ui.measureText("").height == 0);
+    require(ui.measureText("АБВГ", 16).height == 19);
+
+    // Every command snapshots its own vertical advance.
+    ui.text(0, 0, "A\nB", zx::ColorIndex{12});
+    ui.setLineSpacing(0);
+    ui.text(24, 0, "A\nB", zx::ColorIndex{12});
+    zx::Context ref(96, 64);
+    ref.text(0, 0, "A", zx::ColorIndex{12});
+    ref.text(0, 11, "B", zx::ColorIndex{12});
+    ref.text(24, 0, "A", zx::ColorIndex{12});
+    ref.text(24, 8, "B", zx::ColorIndex{12});
+    require(render(ui) == render(ref));
+
+    // Wrapping, panel text, and styled fragments all respect line spacing.
+    ui.clear();
+    ui.setLineSpacing(2);
+    ui.textBox(0, 0, 16, "ABCD", zx::ColorIndex{12});
+    ref.clear();
+    ref.text(0, 0, "AB", zx::ColorIndex{12});
+    ref.text(0, 10, "CD", zx::ColorIndex{12});
+    require(render(ui) == render(ref));
+    ui.clear();
+    ui.panelText({0, 0, 16, 20}, "ABCD", zx::ColorIndex{12});
+    require(render(ui) == render(ref));
+    zx::StyledText styled;
+    styled.add("AB", zx::ColorIndex{12});
+    styled.add("CD", zx::ColorIndex{12});
+    ui.clear();
+    ui.panelStyledText({0, 0, 16, 20}, styled);
+    require(render(ui) == render(ref));
+    ui.clear();
+    ui.styledTextBox(0, 0, 16, styled);
+    require(render(ui) == render(ref));
+
+    // Prepared reveal retains its vertical layout after Context changes.
+    zx::RevealOptions options;
+    options.charsPerSecond = 0;
+    options.cursorEnabled = false;
+    zx::TextReveal reveal(options);
+    reveal.setStyledText(ui, styled, 16);
+    require(reveal.metrics().height == 18 && reveal.lineHeight() == 10);
+    require(reveal.caretLine() == 2);  // Cursor wraps after a full last line.
+    ui.setLineSpacing(0);
+    ui.clear();
+    reveal.draw(ui, 0, 0);
+    require(render(ui) == render(ref));
+    zx::TextViewport viewport;
+    viewport.configure(reveal, {0, 0, 16, 18});
+    require(viewport.pageLines() == 2); // Two 8-px glyphs at rows 0 and 10.
+    viewport.end(reveal);
+    viewport.home();
+    ui.clear();
+    reveal.draw(ui, viewport);
+    require(render(ui) == render(ref));
+    viewport.scrollLines(1);
+    ui.clear();
+    reveal.draw(ui, viewport);
+    ref.clear();
+    ref.text(0, 0, "CD", zx::ColorIndex{12});
+    require(render(ui) == render(ref));
+
+    // A complete line advances the block cursor by glyph height + gap.
+    zx::RevealOptions cursor_options;
+    cursor_options.charsPerSecond = 0;
+    cursor_options.cursorEnabled = true;
+    cursor_options.cursorAfterComplete = true;
+    cursor_options.cursorGapPx = 0;
+    zx::TextReveal cursor_reveal(cursor_options);
+    ui.setLineSpacing(3);
+    cursor_reveal.setText(ui, "AB", 16);
+    require(cursor_reveal.lineHeight() == 11 && cursor_reveal.caretLine() == 1);
+    ui.clear();
+    cursor_reveal.draw(ui, 0, 0);
+    auto cursor_pixels = render(ui);
+    const auto cursor_color = zx::paletteColor(zx::Palette::MonoGreen, {10});
+    require(cursor_pixels[offset(0, 11, stride)] == cursor_color.r);
+    require(cursor_pixels[offset(0, 11, stride) + 1] == cursor_color.g);
+    require(cursor_pixels[offset(0, 8, stride) + 3] == 0);
+    require(cursor_pixels[offset(0, 10, stride) + 3] == 0);
+
+    // Spectrum INVERSE fills whole cells, including spaces and empty pixels.
+    zx::TextStyle inverse;
+    inverse.foreground = zx::ColorIndex{12};
+    inverse.inverse = true;
+    zx::StyledText reversed;
+    reversed.add(" A ", inverse);
+    zx::Context spectrum(96, 64);
+    spectrum.setPalette(zx::Palette::Spectrum);
+    spectrum.styledText(0, 0, reversed);
+    auto pixels = render(spectrum);
+    const auto ink = zx::paletteColor(zx::Palette::Spectrum, {0});
+    const auto paper = zx::paletteColor(zx::Palette::Spectrum, {12});
+    for (int y = 0; y < 8; ++y) {
+        for (int x = 0; x < 8; ++x) {
+            require(pixels[offset(x, y, stride)] == paper.r);
+            require(pixels[offset(x, y, stride) + 1] == paper.g);
+        }
+    }
+    require(pixels[offset(8, 0, stride)] == paper.r);  // Blank A bitmap pixel.
+    require(pixels[offset(10, 1, stride)] == ink.r);    // A bitmap pixel.
+    require(pixels[offset(10, 1, stride) + 1] == ink.g);
+    require(pixels[offset(16, 7, stride)] == paper.r); // Trailing space.
+    require(pixels[offset(24, 0, stride) + 3] == 0);   // Unpainted next cell.
+    spectrum.setPalette(zx::Palette::MonoAmber);
+    pixels = render(spectrum);
+    const auto amber_paper = zx::paletteColor(zx::Palette::MonoAmber, {12});
+    require(pixels[offset(0, 0, stride)] == amber_paper.r);
+    require(pixels[offset(0, 0, stride) + 1] == amber_paper.g);
+
+    // Explicit INK/PAPER swap, also for the optional 6x8 compact font.
+    inverse.background = zx::Color{15, 45, 75, 255};
+    reversed.clear();
+    reversed.add(" A", inverse);
+    spectrum.clear();
+    spectrum.styledText(0, 0, reversed);
+    pixels = render(spectrum);
+    require(pixels[offset(0, 0, stride)] == amber_paper.r);
+    require(pixels[offset(10, 1, stride)] == 15);
+    require(pixels[offset(10, 1, stride) + 1] == 45);
+    zx::Font compact = zx::Font::loadPsf2(ZXFONT_TEST_COMPACT_PATH);
+    spectrum.setFont(compact);
+    spectrum.clear();
+    spectrum.styledText(0, 0, reversed);
+    pixels = render(spectrum);
+    for (int y = 0; y < 8; ++y) {
+        for (int x = 0; x < 6; ++x) {
+            require(pixels[offset(x, y, stride)] == amber_paper.r);
+        }
+    }
+    require(pixels[offset(12, 0, stride) + 3] == 0);
+
+    ui.setLineSpacing(std::numeric_limits<std::uint32_t>::max());
+    require(throws<std::overflow_error>([&] { (void)ui.measureText("A\nB"); }));
+    require(throws<std::overflow_error>([&] { reveal.setText(ui, "AB", 16); }));
+}
+
+
 }  // namespace
 
 int main() {
@@ -1391,4 +1542,5 @@ int main() {
     testPanels();
     testTextViewport();
     testStyledText();
+    testLineSpacingAndInverseVideo();
 }

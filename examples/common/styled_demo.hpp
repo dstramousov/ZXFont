@@ -29,7 +29,7 @@ inline zx::StyledText styledConversation(std::string_view message) {
     return result;
 }
 
-/** @brief Mark one key phrase using a colored background and an underline. */
+/** @brief Mark one key phrase with full-cell Spectrum INVERSE. */
 inline zx::StyledText styledReply(std::string_view message) {
     zx::StyledText result;
     // Each scene has a single emphasis point, useful for testing wraps.
@@ -43,7 +43,7 @@ inline zx::StyledText styledReply(std::string_view message) {
             zx::TextStyle accent;
             accent.foreground = zx::ColorIndex{15};
             accent.background = zx::ColorIndex{1};
-            accent.underline = true;
+            accent.inverse = true;
             result.add(message.substr(found, marker.size()), accent);
             result.add(message.substr(found + marker.size()), zx::ColorIndex{12});
             return result;

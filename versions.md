@@ -125,3 +125,10 @@
 - Resolve indexed foreground/background at render time so palettes remain switchable; clip backgrounds and underlines to panels.
 - Highlight dialogue speakers and key phrases in Kaya and Mode256; cover wrapping, blending, validation, cursor, palette and viewport behavior with tests.
 - Update the root README API reference and `docs/API.md` without duplicating the version log in README.
+
+## v0.0.16 -> v0.0.17
+
+- Add `Context::setLineSpacing(pixels)` (default 0) and capture it independently per text command and prepared `TextReveal`; include it in metrics, wrapped lines, panel alignment/clipping, cursor advance, and viewport page geometry.
+- Preserve Spectrum INVERSE video in styled text across the entire glyph cell including spaces; verify explicit and default PAPER colors, dynamic palettes, and 8x8 / 6x8 fonts with pixel-level tests.
+- Showcase inverse highlighting in dialogue demos, and add F10 line spacing (0..3) without introducing a configuration file; update the README/API reference.
+- Close the font/text rendering feature cycle. CRT postprocessing is a separate future module, not part of this release.
